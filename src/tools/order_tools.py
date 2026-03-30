@@ -1,0 +1,176 @@
+"""Mock order tools for the order agent.
+
+These tools simulate cart and order management. Replace with real API calls
+when the App Service is available.
+"""
+
+from langchain_core.tools import tool
+
+# --- In-memory session carts (mock) ---
+_carts: dict[str, list[dict]] = {}
+
+
+def _get_cart(session_id: str) -> list[dict]:
+    """Get or create cart for a session."""
+    if session_id not in _carts:
+        _carts[session_id] = []
+    return _carts[session_id]
+
+
+def _format_price(price: int) -> str:
+    return f"{price:,}đ"
+
+
+# Simple dish lookup for validation
+_DISH_PRICES = {
+    "phở bò": 55000,
+    "phở gà": 50000,
+    "cơm sườn nướng": 60000,
+    "cơm gà xối mỡ": 55000,
+    "bún bò huế": 55000,
+    "bún chả hà nội": 50000,
+    "trà đá": 5000,
+    "nước cam tươi": 25000,
+    "cà phê sữa đá": 25000,
+    "chè thái": 20000,
+}
+
+
+def _find_dish(name: str) -> tuple[str, int] | None:
+    """Find dish by partial name match."""
+    name_lower = name.lower()
+    for dish_name, price in _DISH_PRICES.items():
+        if name_lower in dish_name or dish_name in name_lower:
+            return dish_name, price
+    return None
+
+
+@tool
+def add_to_cart(session_id: str, dish_name: str, quantity: int = 1) -> str:
+    """Thêm món ăn vào giỏ hàng.
+
+    Args:
+        session_id: ID phiên chat của người dùng
+        dish_name: Tên món ăn cần thêm
+        quantity: Số lượng (mặc định 1)
+    """
+    found = _find_dish(dish_name)
+    if not found:
+        return f"❌ Không tìm thấy món '{dish_name}' trong thực đơn. Vui lòng kiểm tra lại tên món."
+
+    actual_name, price = found
+    cart = _get_cart(session_id)
+
+    # Check if dish already in cart
+    for item in cart:
+        if item["name"] == actual_name:
+            item["quantity"] += quantity
+            return (
+                f"✅ Đã cập nhật: {actual_name.title()} x{item['quantity']} "
+                f"({_format_price(price * item['quantity'])})"
+            )
+
+    cart.append({"name": actual_name, "price": price, "quantity": quantity})
+    return f"✅ Đã thêm: {actual_name.title()} x{quantity} ({_format_price(price * quantity)})"
+
+
+@tool
+def remove_from_cart(session_id: str, dish_name: str) -> str:
+    """Xóa một món ăn khỏi giỏ hàng.
+
+    Args:
+        session_id: ID phiên chat của người dùng
+        dish_name: Tên món ăn cần xóa
+    """
+    cart = _get_cart(session_id)
+    dish_name_lower = dish_name.lower()
+
+    for i, item in enumerate(cart):
+        if dish_name_lower in item["name"] or item["name"] in dish_name_lower:
+            removed = cart.pop(i)
+            return f"✅ Đã xóa {removed['name'].title()} khỏi giỏ hàng."
+
+    return f"❌ Không tìm thấy '{dish_name}' trong giỏ hàng."
+
+
+@tool
+def view_cart(session_id: str) -> str:
+    """Xem nội dung giỏ hàng hiện tại.
+
+    Args:
+        session_id: ID phiên chat của người dùng
+    """
+    cart = _get_cart(session_id)
+
+    if not cart:
+        return "🛒 Giỏ hàng trống. Bạn chưa thêm món nào."
+
+    result = "🛒 Giỏ hàng của bạn:\n"
+    total = 0
+    for item in cart:
+        subtotal = item["price"] * item["quantity"]
+        total += subtotal
+        result += f"  • {item['name'].title()} x{item['quantity']} — {_format_price(subtotal)}\n"
+    result += f"\n💰 Tổng cộng: {_format_price(total)}"
+    return result
+
+
+@tool
+def update_cart_quantity(session_id: str, dish_name: str, quantity: int) -> str:
+    """Cập nhật số lượng của một món trong giỏ hàng.
+
+    Args:
+        session_id: ID phiên chat của người dùng
+        dish_name: Tên món ăn cần cập nhật
+        quantity: Số lượng mới (đặt 0 để xóa)
+    """
+    cart = _get_cart(session_id)
+    dish_name_lower = dish_name.lower()
+
+    for i, item in enumerate(cart):
+        if dish_name_lower in item["name"] or item["name"] in dish_name_lower:
+            if quantity <= 0:
+                removed = cart.pop(i)
+                return f"✅ Đã xóa {removed['name'].title()} khỏi giỏ hàng."
+            item["quantity"] = quantity
+            return (
+                f"✅ Đã cập nhật: {item['name'].title()} x{quantity} "
+                f"({_format_price(item['price'] * quantity)})"
+            )
+
+    return f"❌ Không tìm thấy '{dish_name}' trong giỏ hàng."
+
+
+@tool
+def place_order(session_id: str, delivery_address: str = "", note: str = "") -> str:
+    """Xác nhận đặt hàng với giỏ hàng hiện tại.
+
+    Args:
+        session_id: ID phiên chat của người dùng
+        delivery_address: Địa chỉ giao hàng
+        note: Ghi chú cho đơn hàng (ví dụ: không hành, ít cay)
+    """
+    cart = _get_cart(session_id)
+
+    if not cart:
+        return "❌ Giỏ hàng trống. Vui lòng thêm món trước khi đặt hàng."
+
+    total = sum(item["price"] * item["quantity"] for item in cart)
+    items_str = ", ".join(
+        f"{item['name'].title()} x{item['quantity']}" for item in cart)
+
+    # Clear the cart after ordering
+    _carts[session_id] = []
+
+    result = (
+        f"✅ Đặt hàng thành công!\n"
+        f"  📦 Đơn hàng: {items_str}\n"
+        f"  💰 Tổng tiền: {_format_price(total)}\n"
+    )
+    if delivery_address:
+        result += f"  📍 Giao đến: {delivery_address}\n"
+    if note:
+        result += f"  📝 Ghi chú: {note}\n"
+    result += f"  ⏱️ Thời gian dự kiến: 25-35 phút"
+
+    return result

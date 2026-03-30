@@ -1,0 +1,42 @@
+"""Promotion agent for handling discount and promotion queries."""
+
+from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.language_models import BaseChatModel
+from langgraph.prebuilt import create_react_agent
+
+from src.agents.state import AgentState
+from src.tools.promotion_tools import get_active_promotions, check_promotion_for_dish, check_coupon
+
+PROMOTION_AGENT_PROMPT = """Bạn là trợ lý chuyên về khuyến mãi và ưu đãi nhà hàng. Nhiệm vụ của bạn là giúp khách hàng:
+
+- Xem các chương trình khuyến mãi đang có
+- Kiểm tra khuyến mãi áp dụng cho món ăn cụ thể
+- Xác minh mã giảm giá (coupon)
+- Tư vấn cách tiết kiệm khi đặt hàng
+
+Sử dụng các tools có sẵn để tra cứu thông tin khuyến mãi. Luôn trả lời bằng tiếng Việt, nhiệt tình và chi tiết.
+Hãy chủ động gợi ý combo hoặc ưu đãi phù hợp cho khách.
+"""
+
+
+def create_promotion_agent(llm: BaseChatModel):
+    """Create the promotion agent using ReAct pattern."""
+    tools = [get_active_promotions, check_promotion_for_dish, check_coupon]
+    agent = create_react_agent(llm, tools, prompt=PROMOTION_AGENT_PROMPT)
+    return agent
+
+
+def create_promotion_agent_node(llm: BaseChatModel):
+    """Create the promotion agent node for the graph."""
+    agent = create_promotion_agent(llm)
+
+    async def promotion_agent_node(state: AgentState) -> dict:
+        """Process promotion-related queries."""
+        result = await agent.ainvoke({"messages": state["messages"]})
+        last_message = result["messages"][-1]
+        return {
+            "messages": [AIMessage(content=last_message.content, name="promotion_agent")],
+            "next_agent": "FINISH",
+        }
+
+    return promotion_agent_node
