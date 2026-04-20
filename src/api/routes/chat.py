@@ -44,7 +44,7 @@ def _is_simple_greeting(text: str) -> bool:
     response_model=ChatResponse,
     summary="Send a chat message",
     description="Send a text message to the AI chatbot. The system automatically analyzes user intent "
-    "and routes to the appropriate agent (menu, order, promotion) for processing.",
+    "and routes through coordinator -> team (data/action) -> specialized agent for processing.",
 )
 async def chat(request: ChatRequest):
     """Process a chat message through the multi-agent system."""

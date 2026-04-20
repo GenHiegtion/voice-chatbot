@@ -1,7 +1,6 @@
 """Shared state definition for the LangGraph multi-agent workflow."""
 
-import operator
-from typing import Annotated, Literal
+from typing import Literal
 
 from langgraph.graph import MessagesState
 
@@ -13,9 +12,15 @@ class AgentState(MessagesState):
     that automatically appends new messages.
     """
 
-    # Which agent to route to next
-    next_agent: Literal["menu_agent", "order_agent",
-                        "promotion_agent", "FINISH"] = "FINISH"
+    # Which node to route to next in the graph.
+    next_agent: Literal[
+        "data_team",
+        "action_team",
+        "menu_agent",
+        "promotion_agent",
+        "order_agent",
+        "FINISH",
+    ] = "FINISH"
 
     # Session ID for cart persistence
     session_id: str = ""
