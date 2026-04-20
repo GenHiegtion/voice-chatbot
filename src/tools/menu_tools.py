@@ -4,6 +4,8 @@ These tools simulate a menu database. Replace with real API calls
 when the App Service is available.
 """
 
+from functools import lru_cache
+
 from langchain_core.tools import tool
 
 # --- Mock data ---
@@ -109,20 +111,41 @@ MOCK_MENU = {
     ],
 }
 
+_CATEGORY_MAP = {
+    "phở": "pho",
+    "pho": "pho",
+    "cơm": "com",
+    "com": "com",
+    "bún": "bun",
+    "bun": "bun",
+    "đồ uống": "drink",
+    "nước": "drink",
+    "drink": "drink",
+    "tráng miệng": "dessert",
+    "chè": "dessert",
+    "dessert": "dessert",
+}
 
+
+@lru_cache(maxsize=2048)
 def _format_price(price: int) -> str:
     """Format price in VND."""
     return f"{price:,}đ"
 
 
-@tool
-def get_menu_categories() -> str:
-    """Lấy danh sách các danh mục món ăn trong thực đơn."""
+@lru_cache(maxsize=1)
+def _build_categories_text() -> str:
     categories = MOCK_MENU["categories"]
     result = "📋 Danh mục thực đơn:\n"
     for cat in categories:
         result += f"  • {cat['name']}: {cat['description']}\n"
     return result
+
+
+@tool
+def get_menu_categories() -> str:
+    """Lấy danh sách các danh mục món ăn trong thực đơn."""
+    return _build_categories_text()
 
 
 @tool
@@ -185,23 +208,7 @@ def get_dishes_by_category(category: str) -> str:
     """
     category_lower = category.lower()
 
-    # Map common names to category IDs
-    category_map = {
-        "phở": "pho",
-        "pho": "pho",
-        "cơm": "com",
-        "com": "com",
-        "bún": "bun",
-        "bun": "bun",
-        "đồ uống": "drink",
-        "nước": "drink",
-        "drink": "drink",
-        "tráng miệng": "dessert",
-        "chè": "dessert",
-        "dessert": "dessert",
-    }
-
-    cat_id = category_map.get(category_lower, category_lower)
+    cat_id = _CATEGORY_MAP.get(category_lower, category_lower)
     dishes = [d for d in MOCK_MENU["dishes"] if d["category"] == cat_id]
 
     if not dishes:
