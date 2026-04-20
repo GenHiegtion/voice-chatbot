@@ -1,4 +1,4 @@
-# 🍜 Android AI Service
+# 🍜 Voice Chatbot
 
 AI Service for a food ordering application — Multi-Agent Chatbot & Vietnamese Speech-to-Text.
 
@@ -333,17 +333,18 @@ Mobile App
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LLM_PROVIDER` | `openrouter` or `ollama` | `openrouter` |
+| `LLM_PROVIDER` | `openrouter` or `ollama` | `ollama` |
 | `OPENROUTER_API_KEY` | API key from openrouter.ai | _(required)_ |
 | `OPENROUTER_BASE_URL` | OpenRouter API base URL | `https://openrouter.ai/api/v1` |
 | `LLM_MODEL` | Model ID for the chatbot | `openai/gpt-4o` |
-| `CORRECTION_LLM_PROVIDER` | Provider for ASR correction | `openrouter` |
-| `CORRECTION_MODEL` | Lighter model for STT correction | `openai/gpt-4o-mini` |
+| `CORRECTION_LLM_PROVIDER` | Provider for ASR correction | `ollama` |
+| `CORRECTION_MODEL` | Model for STT correction | `llama3` |
 
 ### Ollama (Future — Mac Mini with MPS)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `OLLAMA_API_KEY` | API key/token for Ollama gateway (if required) | _(empty)_ |
 | `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Model name on Ollama | `llama3` |
 
@@ -352,6 +353,15 @@ Mobile App
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `VAD_ENABLED` | Enable/disable Silero VAD | `true` |
+
+### Runtime Tuning
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ASR_MAX_WORKERS` | Number of ASR worker threads | `4` |
+| `CART_TTL_SECONDS` | Expiration time for in-memory carts (seconds) | `3600` |
+| `MODEL_PRELOAD_ON_STARTUP` | Preload ASR/VAD models at startup | `false` |
+| `LOG_LEVEL` | App log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
 
 ### Database (MySQL)
 
@@ -372,6 +382,13 @@ Mobile App
 | `HOST` | Server bind address | `0.0.0.0` |
 | `PORT` | Server port | `8000` |
 
+### Model Cache Paths
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HF_HOME` | HuggingFace cache root (ChunkFormer files) | _(system default)_ |
+| `TORCH_HOME` | Torch Hub cache root (Silero VAD files) | _(system default)_ |
+
 ---
 
 ## 📦 Model Storage
@@ -384,6 +401,8 @@ AI models are downloaded automatically on first STT request and cached at:
 | Silero VAD | `~/.cache/torch/hub/` |
 
 No HuggingFace token required — all models are public.
+
+When caches already exist, the service reuses local files and avoids downloading again.
 
 ---
 
