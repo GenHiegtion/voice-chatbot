@@ -90,6 +90,22 @@ def get_session_factory():
     return _session_factory
 
 
+async def close_engine() -> None:
+    """Dispose global database engine and reset factories.
+
+    Safe to call multiple times.
+    """
+    global _engine, _session_factory
+
+    if _engine is None:
+        return
+
+    await _engine.dispose()
+    _engine = None
+    _session_factory = None
+    logger.info("Database engine disposed")
+
+
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Async context manager for database sessions.
 
