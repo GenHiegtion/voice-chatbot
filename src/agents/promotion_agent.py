@@ -1,11 +1,15 @@
 """Promotion agent for handling discount and promotion queries."""
 
-from langchain_core.messages import AIMessage, SystemMessage
+import logging
+
+from langchain_core.messages import AIMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
 
 from src.agents.state import AgentState
 from src.tools.promotion_tools import get_active_promotions, check_promotion_for_dish, check_coupon
+
+logger = logging.getLogger(__name__)
 
 PROMOTION_AGENT_PROMPT = """Bạn là trợ lý chuyên về khuyến mãi và ưu đãi nhà hàng. Nhiệm vụ của bạn là giúp khách hàng:
 
@@ -32,11 +36,26 @@ def create_promotion_agent_node(llm: BaseChatModel):
 
     async def promotion_agent_node(state: AgentState) -> dict:
         """Process promotion-related queries."""
-        result = await agent.ainvoke({"messages": state["messages"]})
-        last_message = result["messages"][-1]
-        return {
-            "messages": [AIMessage(content=last_message.content, name="promotion_agent")],
-            "next_agent": "FINISH",
-        }
+        session_id = state.get("session_id", "")
+        logger.info("FLOW promotion_agent.start session_id=%s", session_id)
+        try:
+            result = await agent.ainvoke({"messages": state["messages"]})
+            last_message = result["messages"][-1]
+            logger.info("FLOW promotion_agent.done session_id=%s", session_id)
+            return {
+                "messages": [AIMessage(content=last_message.content, name="promotion_agent")],
+                "next_agent": "FINISH",
+            }
+        except Exception:
+            logger.error("FLOW promotion_agent.failed session_id=%s", session_id, exc_info=True)
+            return {
+                "messages": [
+                    AIMessage(
+                        content="Xin lỗi, mình chưa thể kiểm tra khuyến mãi lúc này. Bạn vui lòng thử lại sau nhé.",
+                        name="promotion_agent",
+                    )
+                ],
+                "next_agent": "FINISH",
+            }
 
     return promotion_agent_node
