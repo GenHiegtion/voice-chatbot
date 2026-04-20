@@ -1,19 +1,32 @@
 """Vietnamese ASR pipeline using ChunkFormer model."""
 
 import asyncio
+from contextlib import redirect_stderr, redirect_stdout
+from concurrent.futures import ThreadPoolExecutor
 import io
 import logging
 import os
 import tempfile
 from functools import lru_cache
 
+import soundfile as sf
 import torch
+
+from src.config import configure_model_cache_environment, get_settings
+from src.speech.vad import extract_speech
 
 logger = logging.getLogger(__name__)
 
 # Singleton model instance
 _model = None
 _device = None
+_executor = None
+_MIN_ASR_SAMPLES = 400
+
+
+def is_asr_model_loaded() -> bool:
+    """Return whether the ASR model is already loaded in memory."""
+    return _model is not None
 
 
 def _get_device() -> str:
@@ -37,16 +50,15 @@ def get_asr_model():
         return _model
 
     try:
-        from chunkformer import ChunkFormerModel
+        # chunkformer may print optional dependency notices to stdout/stderr.
+        # Silence those to keep API logs focused.
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            from chunkformer import ChunkFormerModel
 
-        # Set HuggingFace cache dir if configured
-        from src.config import get_settings
-        settings = get_settings()
-        if settings.hf_home:
-            os.environ["HF_HOME"] = settings.hf_home
+        configure_model_cache_environment()
 
         _device = _get_device()
-        logger.info(f"Loading ChunkFormer model on device: {_device}")
+        logger.info("Loading ChunkFormer model", extra={"device": _device})
 
         # Try loading from local cache first (skip HuggingFace HTTP checks).
         # Only download if model is not cached yet.
@@ -56,23 +68,34 @@ def get_asr_model():
                 local_files_only=True,
             )
         except Exception:
-            logger.info(
-                "Model not found in cache, downloading from HuggingFace...")
+            logger.info("ChunkFormer model not found in local cache, downloading")
             _model = ChunkFormerModel.from_pretrained(
                 "khanhld/chunkformer-ctc-large-vie",
             )
         _model = _model.to(_device)
 
-        logger.info("ChunkFormer model loaded successfully.")
+        logger.info("ChunkFormer model loaded")
         return _model
 
     except Exception as e:
-        logger.error(f"Failed to load ChunkFormer model: {e}")
+        logger.error("Failed to load ChunkFormer model", exc_info=True)
         raise RuntimeError(
             f"Could not load ChunkFormer ASR model. "
             f"Make sure 'chunkformer' is installed and the model can be downloaded. "
             f"Error: {e}"
         )
+
+
+def _get_asr_executor() -> ThreadPoolExecutor:
+    """Create or get the bounded executor used by ASR tasks."""
+    global _executor
+    if _executor is None:
+        max_workers = max(1, get_settings().asr_max_workers)
+        _executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="asr-worker",
+        )
+    return _executor
 
 
 @lru_cache(maxsize=16)
@@ -88,9 +111,6 @@ def _transcribe_sync(audio_bytes: bytes, sample_rate: int) -> str:
     All CPU-intensive work (audio decoding, resampling, VAD, model inference)
     is done here to avoid blocking the async event loop.
     """
-    import soundfile as sf
-    import numpy as np
-
     # Read audio from bytes
     audio_buffer = io.BytesIO(audio_bytes)
     audio_data, sr = sf.read(audio_buffer)
@@ -108,20 +128,23 @@ def _transcribe_sync(audio_bytes: bytes, sample_rate: int) -> str:
         audio_data = waveform.squeeze(0).numpy()
 
     # Apply VAD to filter speech segments (if enabled)
-    from src.config import get_settings
     settings = get_settings()
 
     if settings.vad_enabled:
-        from src.speech.vad import extract_speech
-
-        logger.info("Applying VAD to filter speech segments...")
         speech_audio = extract_speech(audio_data, sample_rate)
 
         if speech_audio is not None:
             audio_data = speech_audio
-            logger.info(f"VAD: extracted {len(audio_data)} speech samples")
         else:
-            logger.warning("VAD: no speech detected, using original audio")
+            logger.debug("VAD found no speech segments; using original audio")
+
+    # Guard against ultra-short waveforms that can crash feature extraction.
+    if len(audio_data) < _MIN_ASR_SAMPLES:
+        logger.info(
+            "Audio too short for ASR inference; returning empty transcription",
+            extra={"samples": int(len(audio_data))},
+        )
+        return ""
 
     # Get model
     model = get_asr_model()
@@ -137,10 +160,11 @@ def _transcribe_sync(audio_bytes: bytes, sample_rate: int) -> str:
         tmp_file.close()
 
         # Use endless_decode for long-form transcription
-        result = model.endless_decode(
-            tmp_file.name,
-            return_timestamps=False,
-        )
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            result = model.endless_decode(
+                tmp_file.name,
+                return_timestamps=False,
+            )
     finally:
         if tmp_file and os.path.exists(tmp_file.name):
             os.unlink(tmp_file.name)
@@ -177,11 +201,15 @@ async def transcribe_audio(audio_bytes: bytes, sample_rate: int = 16000) -> str:
     """
     try:
         loop = asyncio.get_running_loop()
+        executor = _get_asr_executor()
         text = await loop.run_in_executor(
-            None, _transcribe_sync, audio_bytes, sample_rate
+            executor,
+            _transcribe_sync,
+            audio_bytes,
+            sample_rate,
         )
         return text
 
     except Exception as e:
-        logger.error(f"Transcription error: {e}")
+        logger.error("Transcription failed", exc_info=True)
         raise RuntimeError(f"Failed to transcribe audio: {e}")
