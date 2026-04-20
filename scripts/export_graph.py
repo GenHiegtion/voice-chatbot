@@ -1,31 +1,35 @@
-"""Export LangGraph chatbot architecture as PNG images."""
+"""Export chatbot architecture diagrams to statics/.
 
-import os
-import sys
+Run:
+    uv run graph.py
+"""
+
 from pathlib import Path
 
-# Add project root to Python path (works from any directory)
-PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-sys.path.insert(0, PROJECT_ROOT)
-os.chdir(PROJECT_ROOT)
-
-from src.agents.graph import get_graph  # noqa: E402
+from src.agents.graph import get_graph
 
 
-def main():
-    docs_dir = os.path.join(PROJECT_ROOT, "docs")
-    os.makedirs(docs_dir, exist_ok=True)
+def export_graph_images(output_dir: Path) -> None:
+    """Render and save overview + detailed graph images."""
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     graph = get_graph()
+    renders = [
+        (False, "overview_graph.png"),
+        (True, "detailed_graph.png"),
+    ]
 
-    for xray, name in [(False, "overview_graph.png"), (True, "detailed_graph.png")]:
+    for xray, name in renders:
         png = graph.get_graph(xray=xray).draw_mermaid_png()
-        path = os.path.join(docs_dir, name)
-        with open(path, "wb") as f:
-            f.write(png)
-        print(f"✅ {name}")
+        path = output_dir / name
+        path.write_bytes(png)
+        print(f"Saved: {path}")
 
-    print(f"\nSaved to: {docs_dir}/")
+
+def main() -> None:
+    project_root = Path(__file__).resolve().parent.parent
+    output_dir = project_root / "statics"
+    export_graph_images(output_dir)
 
 
 if __name__ == "__main__":

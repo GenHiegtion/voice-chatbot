@@ -11,19 +11,19 @@ from src.tools.order_tools import add_to_cart, remove_from_cart, view_cart, upda
 
 logger = logging.getLogger(__name__)
 
-ORDER_AGENT_PROMPT = """Bạn là trợ lý quản lý đơn hàng nhà hàng. Nhiệm vụ của bạn là giúp khách hàng:
+ORDER_AGENT_PROMPT = """You are the restaurant ordering assistant. Your responsibilities are to help users:
 
-- Thêm món ăn vào giỏ hàng
-- Xóa món khỏi giỏ hàng
-- Cập nhật số lượng món
-- Xem giỏ hàng hiện tại
-- Xác nhận đặt hàng
+- Add items to the cart
+- Remove items from the cart
+- Update item quantities
+- View the current cart
+- Confirm and place orders
 
-Lưu ý quan trọng:
-- Khi gọi các tools, bạn PHẢI truyền session_id từ state.
-- Luôn xác nhận lại với khách trước khi đặt hàng chính thức.
-- Trả lời bằng tiếng Việt, thân thiện và rõ ràng.
-- Nếu khách muốn đặt hàng, hãy hỏi địa chỉ giao hàng nếu chưa có.
+Important notes:
+- When using tools, you MUST pass the session_id from state.
+- Always confirm with the customer before placing the final order.
+- Respond in Vietnamese, clearly and politely.
+- Ask for delivery address if the user wants to place an order and the address is missing.
 """
 
 
@@ -44,7 +44,10 @@ def create_order_agent_node(llm: BaseChatModel):
         # Inject session_id into the message context so the agent knows which cart to use
         session_id = state.get("session_id", "default")
         logger.info("FLOW order_agent.start session_id=%s", session_id)
-        session_msg = f"\n[Thông tin hệ thống: session_id của người dùng hiện tại là '{session_id}'. Hãy sử dụng session_id này khi gọi các order tools.]"
+        session_msg = (
+            f"\n[System context: the current user's session_id is '{session_id}'. "
+            "Use this session_id whenever calling order tools.]"
+        )
 
         messages = list(state["messages"])
         # Add session context to the last user message

@@ -1,5 +1,5 @@
 [project]
-name = "android-ai-service"
+name = "voice-chatbot"
 version = "0.1.0"
 description = "AI Service for food ordering app - Multi-Agent Chatbot & Vietnamese ASR"
 readme = "README.md"
