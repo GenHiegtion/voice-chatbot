@@ -1,11 +1,15 @@
 """Menu agent for handling menu-related queries."""
 
-from langchain_core.messages import AIMessage, SystemMessage
+import logging
+
+from langchain_core.messages import AIMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
 
 from src.agents.state import AgentState
 from src.tools.menu_tools import get_menu_categories, search_menu, get_dish_details, get_dishes_by_category
+
+logger = logging.getLogger(__name__)
 
 MENU_AGENT_PROMPT = """Bạn là trợ lý chuyên về thực đơn nhà hàng. Nhiệm vụ của bạn là giúp khách hàng:
 
@@ -33,12 +37,27 @@ def create_menu_agent_node(llm: BaseChatModel):
 
     async def menu_agent_node(state: AgentState) -> dict:
         """Process menu-related queries."""
-        result = await agent.ainvoke({"messages": state["messages"]})
-        # Get the last AI message from the agent
-        last_message = result["messages"][-1]
-        return {
-            "messages": [AIMessage(content=last_message.content, name="menu_agent")],
-            "next_agent": "FINISH",
-        }
+        session_id = state.get("session_id", "")
+        logger.info("FLOW menu_agent.start session_id=%s", session_id)
+        try:
+            result = await agent.ainvoke({"messages": state["messages"]})
+            # Get the last AI message from the agent
+            last_message = result["messages"][-1]
+            logger.info("FLOW menu_agent.done session_id=%s", session_id)
+            return {
+                "messages": [AIMessage(content=last_message.content, name="menu_agent")],
+                "next_agent": "FINISH",
+            }
+        except Exception:
+            logger.error("FLOW menu_agent.failed session_id=%s", session_id, exc_info=True)
+            return {
+                "messages": [
+                    AIMessage(
+                        content="Xin lỗi, mình chưa thể xử lý yêu cầu thực đơn lúc này. Bạn vui lòng thử lại sau nhé.",
+                        name="menu_agent",
+                    )
+                ],
+                "next_agent": "FINISH",
+            }
 
     return menu_agent_node

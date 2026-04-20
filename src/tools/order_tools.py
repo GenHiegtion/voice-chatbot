@@ -4,19 +4,55 @@ These tools simulate cart and order management. Replace with real API calls
 when the App Service is available.
 """
 
+import time
+from functools import lru_cache
+
 from langchain_core.tools import tool
 
+from src.config import get_settings
+
 # --- In-memory session carts (mock) ---
-_carts: dict[str, list[dict]] = {}
+_carts: dict[str, dict] = {}
+_last_cleanup_at = 0.0
+
+
+def _cleanup_expired_carts() -> None:
+    """Clean up stale carts to avoid unbounded memory growth."""
+    global _last_cleanup_at
+
+    now = time.time()
+    # Run cleanup at most once per minute.
+    if now - _last_cleanup_at < 60:
+        return
+
+    ttl_seconds = max(60, get_settings().cart_ttl_seconds)
+    expired_session_ids = [
+        session_id
+        for session_id, cart_data in _carts.items()
+        if now - float(cart_data.get("last_access", now)) > ttl_seconds
+    ]
+
+    for session_id in expired_session_ids:
+        _carts.pop(session_id, None)
+
+    _last_cleanup_at = now
 
 
 def _get_cart(session_id: str) -> list[dict]:
     """Get or create cart for a session."""
+    _cleanup_expired_carts()
+
     if session_id not in _carts:
-        _carts[session_id] = []
-    return _carts[session_id]
+        _carts[session_id] = {
+            "items": [],
+            "last_access": time.time(),
+        }
+
+    _carts[session_id]["last_access"] = time.time()
+    return _carts[session_id]["items"]
 
 
+@lru_cache(maxsize=2048)
 def _format_price(price: int) -> str:
     return f"{price:,}đ"
 
@@ -54,6 +90,9 @@ def add_to_cart(session_id: str, dish_name: str, quantity: int = 1) -> str:
         dish_name: Tên món ăn cần thêm
         quantity: Số lượng (mặc định 1)
     """
+    if quantity <= 0:
+        return "❌ Số lượng phải lớn hơn 0."
+
     found = _find_dish(dish_name)
     if not found:
         return f"❌ Không tìm thấy món '{dish_name}' trong thực đơn. Vui lòng kiểm tra lại tên món."
@@ -124,6 +163,9 @@ def update_cart_quantity(session_id: str, dish_name: str, quantity: int) -> str:
         dish_name: Tên món ăn cần cập nhật
         quantity: Số lượng mới (đặt 0 để xóa)
     """
+    if quantity < 0:
+        return "❌ Số lượng không được âm."
+
     cart = _get_cart(session_id)
     dish_name_lower = dish_name.lower()
 
@@ -160,7 +202,7 @@ def place_order(session_id: str, delivery_address: str = "", note: str = "") -> 
         f"{item['name'].title()} x{item['quantity']}" for item in cart)
 
     # Clear the cart after ordering
-    _carts[session_id] = []
+    _carts.pop(session_id, None)
 
     result = (
         f"✅ Đặt hàng thành công!\n"

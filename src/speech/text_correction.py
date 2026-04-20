@@ -1,6 +1,7 @@
 """LLM-based text correction for ASR output."""
 
 import logging
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -35,6 +36,16 @@ Ví dụ:
 """
 
 
+def _is_expected_provider_error(exc: Exception) -> bool:
+    """Identify transient upstream/provider errors to keep logs concise."""
+    name = type(exc).__name__
+    if name in {"ResponseError", "ConnectError", "ReadTimeout", "TimeoutException"}:
+        return True
+
+    text = str(exc).lower()
+    return any(token in text for token in ["status code: 500", "internal server error", "timeout"])
+
+
 async def correct_text(raw_text: str) -> str:
     """Correct ASR transcription errors using a lightweight LLM.
 
@@ -47,24 +58,49 @@ async def correct_text(raw_text: str) -> str:
     if not raw_text or not raw_text.strip():
         return raw_text
 
-    try:
-        llm = get_correction_llm()
-        messages = [
-            SystemMessage(content=CORRECTION_SYSTEM_PROMPT),
-            HumanMessage(content=raw_text),
-        ]
-        response = await llm.ainvoke(messages)
-        corrected = response.content.strip()
+    llm = get_correction_llm()
+    messages = [
+        SystemMessage(content=CORRECTION_SYSTEM_PROMPT),
+        HumanMessage(content=raw_text),
+    ]
 
-        # Safety: if LLM returns empty or much longer than input, use original
-        if not corrected or len(corrected) > len(raw_text) * 3:
-            logger.warning(
-                "Correction LLM returned suspicious result, using original text.")
-            return raw_text
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            started_at = time.perf_counter()
+            response = await llm.ainvoke(messages)
+            corrected = response.content.strip()
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
 
-        logger.info(f"Text correction: '{raw_text}' → '{corrected}'")
-        return corrected
+            # Safety: if LLM returns empty or much longer than input, use original
+            if not corrected or len(corrected) > len(raw_text) * 3:
+                logger.warning("Correction LLM returned suspicious result; fallback to original")
+                return raw_text
 
-    except Exception as e:
-        logger.warning(f"Text correction failed, using original text: {e}")
-        return raw_text
+            logger.debug(
+                "Text correction succeeded",
+                extra={
+                    "input_length": len(raw_text),
+                    "output_length": len(corrected),
+                    "duration_ms": duration_ms,
+                },
+            )
+            return corrected
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                logger.info(
+                    "Text correction provider failed; retrying once",
+                    extra={"attempt": attempt},
+                )
+                continue
+
+    if last_error is not None and _is_expected_provider_error(last_error):
+        logger.info(
+            "Text correction unavailable from provider; using original ASR text",
+            extra={"error_type": type(last_error).__name__},
+        )
+    else:
+        logger.error("Text correction failed unexpectedly; using original ASR text", exc_info=True)
+
+    return raw_text

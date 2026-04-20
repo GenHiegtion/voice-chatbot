@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from langchain_core.messages import HumanMessage
@@ -13,6 +14,22 @@ from src.speech.text_correction import correct_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Speech"])
+
+
+def _extract_last_ai_message(messages: list[Any]) -> str:
+    """Extract the latest AI message content from graph output messages."""
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "ai" and getattr(msg, "content", ""):
+            return msg.content
+    return ""
+
+
+def _preview_text(text: str, limit: int = 160) -> str:
+    """Return a single-line safe preview for logs."""
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit]}..."
 
 
 @router.post(
@@ -30,19 +47,31 @@ async def speech_to_text(
     try:
         # Read audio bytes
         audio_bytes = await audio.read()
+        logger.info(
+            "FLOW speech_to_text.request_received upload_name=%s size_bytes=%s",
+            audio.filename or "",
+            len(audio_bytes),
+        )
 
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Empty audio file")
 
         # Step 1: ASR transcription
+        logger.info("FLOW speech_to_text.asr_start")
         original_text = await transcribe_audio(audio_bytes)
+        logger.info("FLOW speech_to_text.asr_done text=%s", _preview_text(original_text))
 
         if not original_text:
             raise HTTPException(
                 status_code=422, detail="Could not transcribe audio. Please try again.")
 
         # Step 2: LLM text correction
+        logger.info("FLOW speech_to_text.correction_start")
         corrected_text = await correct_text(original_text)
+        logger.info(
+            "FLOW speech_to_text.correction_done corrected=%s",
+            _preview_text(corrected_text),
+        )
 
         return SpeechToTextResponse(
             original_text=original_text,
@@ -51,10 +80,10 @@ async def speech_to_text(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Speech-to-text error: {e}", exc_info=True)
+    except Exception:
+        logger.error("FLOW speech_to_text.request_failed", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Speech-to-text failed: {str(e)}")
+            status_code=500, detail="Speech-to-text failed")
 
 
 @router.post(
@@ -79,39 +108,59 @@ async def voice_chat(
 
         # Read audio bytes
         audio_bytes = await audio.read()
+        logger.info(
+            "FLOW voice_chat.request_received session_id=%s upload_name=%s size_bytes=%s",
+            session_id,
+            audio.filename or "",
+            len(audio_bytes),
+        )
 
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Empty audio file")
 
         # Step 1: ASR transcription
+        logger.info("FLOW voice_chat.asr_start session_id=%s", session_id)
         original_text = await transcribe_audio(audio_bytes)
+        logger.info(
+            "FLOW voice_chat.asr_done session_id=%s text=%s",
+            session_id,
+            _preview_text(original_text),
+        )
 
         if not original_text:
             raise HTTPException(
                 status_code=422, detail="Could not transcribe audio. Please try again.")
 
         # Step 2: LLM text correction
+        logger.info("FLOW voice_chat.correction_start session_id=%s", session_id)
         corrected_text = await correct_text(original_text)
+        logger.info(
+            "FLOW voice_chat.correction_done session_id=%s corrected=%s",
+            session_id,
+            _preview_text(corrected_text),
+        )
 
         # Step 3: Process through chatbot
         graph = get_graph()
+        user_message = HumanMessage(content=corrected_text)
+        logger.info("FLOW voice_chat.graph_invoke_start session_id=%s", session_id)
         result = await graph.ainvoke(
             {
-                "messages": [HumanMessage(content=corrected_text)],
+                "messages": [user_message],
                 "session_id": session_id,
             }
         )
 
-        # Get the last AI message
-        messages = result.get("messages", [])
-        response_text = ""
-        for msg in reversed(messages):
-            if hasattr(msg, "content") and msg.content and msg.type == "ai":
-                response_text = msg.content
-                break
+        response_text = _extract_last_ai_message(result.get("messages", []))
 
         if not response_text:
             response_text = "Sorry, I couldn't process your request. Please try again."
+
+        logger.info(
+            "FLOW voice_chat.graph_invoke_done session_id=%s response=%s",
+            session_id,
+            _preview_text(response_text),
+        )
 
         return VoiceChatResponse(
             original_text=original_text,
@@ -122,7 +171,7 @@ async def voice_chat(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Voice chat error: {e}", exc_info=True)
+    except Exception:
+        logger.error("FLOW voice_chat.request_failed session_id=%s", session_id or "", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Voice chat failed: {str(e)}")
+            status_code=500, detail="Voice chat failed")

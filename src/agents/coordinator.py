@@ -1,9 +1,25 @@
 """Coordinator (Supervisor) agent that routes user messages to specialized agents."""
 
-from langchain_core.messages import SystemMessage
+import asyncio
+import json
+import logging
+
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, SystemMessage
 
 from src.agents.state import AgentState
+
+logger = logging.getLogger(__name__)
+
+
+def _is_expected_provider_error(exc: Exception) -> bool:
+    """Identify transient upstream/provider errors to keep logs concise."""
+    name = type(exc).__name__
+    if name in {"ResponseError", "ConnectError", "ReadTimeout", "TimeoutException"}:
+        return True
+
+    text = str(exc).lower()
+    return any(token in text for token in ["status code: 500", "internal server error", "timeout"])
 
 COORDINATOR_SYSTEM_PROMPT = """Bạn là trợ lý AI điều phối cho ứng dụng đặt món ăn. Nhiệm vụ của bạn là:
 
@@ -36,12 +52,54 @@ def create_coordinator_node(llm: BaseChatModel):
         messages = [SystemMessage(
             content=COORDINATOR_SYSTEM_PROMPT)] + state["messages"]
 
-        response = await llm.ainvoke(messages)
+        session_id = state.get("session_id", "")
+        user_preview = ""
+        for msg in reversed(state["messages"]):
+            if getattr(msg, "type", "") == "human" and getattr(msg, "content", ""):
+                user_preview = " ".join(str(msg.content).split())[:160]
+                break
+
+        logger.info(
+            "FLOW coordinator.start session_id=%s message=%s",
+            session_id,
+            user_preview,
+        )
+
+        response = None
+        for attempt in range(1, 3):
+            try:
+                response = await llm.ainvoke(messages)
+                break
+            except Exception as exc:
+                logger.warning(
+                    "FLOW coordinator.llm_failed session_id=%s attempt=%s",
+                    session_id,
+                    attempt,
+                )
+                # Log traceback only for unexpected exceptions.
+                if not _is_expected_provider_error(exc):
+                    logger.debug(
+                        "FLOW coordinator.llm_failed_details session_id=%s attempt=%s",
+                        session_id,
+                        attempt,
+                        exc_info=True,
+                    )
+                if attempt < 2:
+                    await asyncio.sleep(0.4 * attempt)
+
+        if response is None:
+            fallback = (
+                "Xin lỗi, hệ thống AI đang tạm bận. Bạn vui lòng thử lại sau ít phút nhé."
+            )
+            logger.error("FLOW coordinator.fallback session_id=%s", session_id)
+            return {
+                "next_agent": "FINISH",
+                "messages": [AIMessage(content=fallback)],
+            }
+
         content = response.content
 
         # Parse the routing decision
-        import json
-
         try:
             # Try to extract JSON from the response
             # Handle cases where LLM wraps JSON in markdown code blocks
@@ -67,10 +125,14 @@ def create_coordinator_node(llm: BaseChatModel):
 
         result = {"next_agent": next_agent}
 
+        logger.info(
+            "FLOW coordinator.route_decision session_id=%s next_agent=%s",
+            session_id,
+            next_agent,
+        )
+
         # If FINISH, add the coordinator's response as a message
         if next_agent == "FINISH" and direct_response:
-            from langchain_core.messages import AIMessage
-
             result["messages"] = [AIMessage(content=direct_response)]
 
         return result

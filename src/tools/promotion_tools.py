@@ -4,6 +4,8 @@ These tools simulate promotion/discount data. Replace with real API calls
 when the App Service is available.
 """
 
+from functools import lru_cache
+
 from langchain_core.tools import tool
 
 # --- Mock data ---
@@ -68,11 +70,14 @@ MOCK_COUPONS = {
 }
 
 
-@tool
-def get_active_promotions() -> str:
-    """Lấy danh sách các chương trình khuyến mãi đang hoạt động."""
-    active = [p for p in MOCK_PROMOTIONS if p["is_active"]]
+@lru_cache(maxsize=1)
+def _get_active_promotions_data() -> tuple[dict, ...]:
+    return tuple(p for p in MOCK_PROMOTIONS if p["is_active"])
 
+
+@lru_cache(maxsize=1)
+def _build_active_promotions_text() -> str:
+    active = _get_active_promotions_data()
     if not active:
         return "Hiện tại không có chương trình khuyến mãi nào."
 
@@ -85,6 +90,12 @@ def get_active_promotions() -> str:
 
 
 @tool
+def get_active_promotions() -> str:
+    """Lấy danh sách các chương trình khuyến mãi đang hoạt động."""
+    return _build_active_promotions_text()
+
+
+@tool
 def check_promotion_for_dish(dish_name: str) -> str:
     """Kiểm tra khuyến mãi áp dụng cho một món ăn cụ thể.
 
@@ -94,9 +105,7 @@ def check_promotion_for_dish(dish_name: str) -> str:
     dish_name_lower = dish_name.lower()
     applicable = []
 
-    for promo in MOCK_PROMOTIONS:
-        if not promo["is_active"]:
-            continue
+    for promo in _get_active_promotions_data():
         # Empty applicable_items means applies to all
         if not promo["applicable_items"] or any(
             dish_name_lower in item for item in promo["applicable_items"]

@@ -5,16 +5,25 @@ improving transcription quality by removing silence/noise.
 """
 
 import logging
+from contextlib import redirect_stderr, redirect_stdout
+import io
 from typing import Optional
 
 import torch
 import numpy as np
+
+from src.config import configure_model_cache_environment
 
 logger = logging.getLogger(__name__)
 
 # Singleton VAD model
 _vad_model = None
 _vad_utils = None
+
+
+def is_vad_model_loaded() -> bool:
+    """Return whether the VAD model is already loaded in memory."""
+    return _vad_model is not None
 
 
 def get_vad_model():
@@ -29,18 +38,22 @@ def get_vad_model():
         return _vad_model, _vad_utils
 
     try:
-        model, utils = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
-            model="silero_vad",
-            trust_repo=True,
-        )
+        configure_model_cache_environment()
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            model, utils = torch.hub.load(
+                repo_or_dir="snakers4/silero-vad",
+                model="silero_vad",
+                trust_repo=True,
+                force_reload=False,
+                skip_validation=True,
+            )
         _vad_model = model
         _vad_utils = utils
-        logger.info("Silero VAD model loaded successfully.")
+        logger.info("Silero VAD model loaded")
         return _vad_model, _vad_utils
 
     except Exception as e:
-        logger.error(f"Failed to load Silero VAD model: {e}")
+        logger.error("Failed to load Silero VAD model", exc_info=True)
         raise RuntimeError(f"Could not load Silero VAD model: {e}")
 
 
@@ -101,7 +114,7 @@ def extract_speech(
         segments = detect_speech_segments(audio_data, sample_rate)
 
         if not segments:
-            logger.warning("No speech detected in audio.")
+            logger.debug("No speech segments detected in audio")
             return None
 
         padding_samples = int(sample_rate * padding_ms / 1000)
@@ -118,6 +131,6 @@ def extract_speech(
 
         return None
 
-    except Exception as e:
-        logger.warning(f"VAD processing failed, using original audio: {e}")
+    except Exception:
+        logger.warning("VAD processing failed, using original audio", exc_info=True)
         return audio_data
