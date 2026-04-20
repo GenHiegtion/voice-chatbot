@@ -12,7 +12,7 @@ This project provides two core services:
 ## 🏗️ Project Structure
 
 ```
-android-ai-service/
+voice-chatbot/
 ├── main.py                          # Entry point — FastAPI application
 ├── pyproject.toml                   # Dependencies & project metadata
 ├── .env                             # Environment variables (API keys, config)
@@ -20,7 +20,7 @@ android-ai-service/
 ├── scripts/
 │   └── export_graph.py              # Export LangGraph architecture as PNG
 │
-├── docs/                            # Architecture diagrams
+├── statics/                         # Architecture diagrams
 │   ├── overview_graph.png
 │   └── detailed_graph.png
 │
@@ -31,11 +31,16 @@ android-ai-service/
     │
     ├── agents/                      # 🤖 Multi-Agent System (LangGraph)
     │   ├── state.py                 # Shared state (messages, session_id)
-    │   ├── coordinator.py           # Coordinator agent — intent analysis & routing
+    │   ├── coordinator.py           # Top coordinator — route to team layer
     │   ├── menu_agent.py            # Menu agent — search dishes, view details
     │   ├── order_agent.py           # Order agent — cart management, checkout
     │   ├── promotion_agent.py       # Promotion agent — coupons, deals
     │   └── graph.py                 # LangGraph workflow definition
+    │
+    ├── teams/                       # 👥 Team routers
+    │   ├── action_team.py           # Action team router — route order actions
+    │   ├── data_team.py             # Data team router — route info queries
+    │   └── team_router.py           # Shared reusable router logic
     │
     ├── api/                         # 🌐 FastAPI Routes & Schemas
     │   ├── schemas.py               # Pydantic models (request/response)
@@ -66,7 +71,7 @@ android-ai-service/
 
 ```bash
 git clone <repo-url>
-cd android-ai-service
+cd voice-chatbot
 cp .env.example .env
 # Edit .env and fill in your OPENROUTER_API_KEY
 ```
@@ -94,13 +99,17 @@ Server runs at: `http://localhost:8000`
 
 ### Overview
 
-![Overview Graph](docs/overview_graph.png)
+![Overview Graph](statics/overview_graph.png)
 
 ### Detailed (X-Ray — shows internal ReAct loops)
 
-![Detailed Graph](docs/detailed_graph.png)
+![Detailed Graph](statics/detailed_graph.png)
 
-> **How it works:** Every user message goes to the **Coordinator** first. The Coordinator uses an LLM to analyze intent and routes to the appropriate sub-agent. Each sub-agent is a **ReAct agent** (Reason + Act loop) that calls tools to answer the user's question, then returns to `__end__`.
+> **How it works:** Every user message goes to the **Coordinator** first. The Coordinator routes to one of two teams:
+> - **data_team** for information lookup (menu, promotions, coupons)
+> - **action_team** for ordering actions (cart updates, checkout)
+>
+> Team routers then select the correct leaf agent. Each leaf agent is a **ReAct agent** (Reason + Act loop) that calls tools and returns to `__end__`.
 
 ### Data Flow
 
@@ -109,6 +118,10 @@ User: "Thêm 2 tô phở bò vào giỏ hàng"
   │
   ▼
 Coordinator (LLM analyzes intent)
+  → Returns: {"next": "action_team", "response": ""}
+  │
+  ▼
+Action Team Router
   → Returns: {"next": "order_agent", "response": ""}
   │
   ▼
@@ -466,6 +479,6 @@ After starting the server, open `http://localhost:8000/docs`:
 uv run python scripts/export_graph.py
 ```
 
-Exports two PNG files to `docs/`:
+Exports two PNG files to `statics/`:
 - `overview_graph.png` — high-level agent routing
 - `detailed_graph.png` — internal ReAct loops (x-ray view)
