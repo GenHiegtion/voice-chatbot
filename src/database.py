@@ -1,8 +1,7 @@
 """Database configuration for MySQL connection.
 
-Currently unused — the chatbot uses mock data.
-When the MySQL database is ready, configure the connection
-in .env and this module will provide the async engine.
+This module provides async MySQL engine/session utilities
+for repository and service layers.
 
 # Setup guide:
 # 1. Add database credentials to your .env file:
@@ -12,10 +11,7 @@ in .env and this module will provide the async engine.
 #    DB_PASSWORD=your_password
 #    DB_NAME=food_ordering
 #
-# 2. Replace mock tools in src/tools/ with real database queries
-#    using the get_db_session() dependency.
-#
-# 3. Example usage in tools:
+# 2. Example usage in repositories/services:
 #    from src.database import get_db_session
 #    from sqlalchemy import text
 #
@@ -28,6 +24,7 @@ in .env and this module will provide the async engine.
 import logging
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -73,7 +70,11 @@ def get_engine():
     )
 
     logger.info(
-        f"Database engine created for {settings.db_host}:{settings.db_port}/{settings.db_name}")
+        "Database engine initialized host=%s port=%s db=%s",
+        settings.db_host,
+        settings.db_port,
+        settings.db_name,
+    )
     return _engine
 
 
@@ -104,6 +105,19 @@ async def close_engine() -> None:
     _engine = None
     _session_factory = None
     logger.info("Database engine disposed")
+
+
+async def probe_database_connection() -> bool:
+    """Run a lightweight read-only DB probe (SELECT 1)."""
+    try:
+        engine = get_engine()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("Database connectivity check succeeded")
+        return True
+    except Exception:
+        logger.exception("Database connectivity check failed")
+        return False
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:

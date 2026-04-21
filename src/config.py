@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     cart_ttl_seconds: int = 3600
     model_preload_on_startup: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    app_timezone: str = "Asia/Ho_Chi_Minh"
 
     # Database (MySQL) — leave empty if not using database yet
     db_host: str = ""

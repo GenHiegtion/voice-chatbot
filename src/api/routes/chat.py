@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from src.api.schemas import ChatRequest, ChatResponse
+from src.api.session_history import append_session_turn, get_session_messages
 from src.agents.graph import get_graph
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ async def chat(request: ChatRequest):
         session_id = request.session_id or str(uuid.uuid4())
         graph = get_graph()
         user_message = HumanMessage(content=user_text)
+        session_history = get_session_messages(session_id)
+        graph_messages = session_history + [user_message]
 
         logger.info(
             "FLOW chat.request_received session_id=%s message=%s",
@@ -67,14 +70,19 @@ async def chat(request: ChatRequest):
                 session_id,
                 _preview_text(response_text),
             )
+            append_session_turn(session_id, user_text, response_text)
             return ChatResponse(response=response_text, session_id=session_id)
 
-        logger.info("FLOW chat.graph_invoke_start session_id=%s", session_id)
+        logger.info(
+            "FLOW chat.graph_invoke_start session_id=%s history_messages=%s",
+            session_id,
+            len(session_history),
+        )
 
         # Invoke the graph
         result = await graph.ainvoke(
             {
-                "messages": [user_message],
+                "messages": graph_messages,
                 "session_id": session_id,
             }
         )
@@ -83,6 +91,8 @@ async def chat(request: ChatRequest):
 
         if not response_text:
             response_text = "Sorry, I couldn't process your request. Please try again."
+
+        append_session_turn(session_id, user_text, response_text)
 
         logger.info(
             "FLOW chat.graph_invoke_done session_id=%s next_agent=%s response=%s",
@@ -123,11 +133,21 @@ async def chat_stream(request: ChatRequest):
         try:
             graph = get_graph()
             user_message = HumanMessage(content=request.message)
+            session_history = get_session_messages(session_id)
+            graph_messages = session_history + [user_message]
+            final_ai_message = ""
+            streamed_chunks: list[str] = []
+
+            logger.info(
+                "FLOW chat.stream_graph_invoke_start session_id=%s history_messages=%s",
+                session_id,
+                len(session_history),
+            )
 
             # Stream events from the graph
             async for event in graph.astream_events(
                 {
-                    "messages": [user_message],
+                    "messages": graph_messages,
                     "session_id": session_id,
                 },
                 version="v2",
@@ -138,7 +158,32 @@ async def chat_stream(request: ChatRequest):
                 if kind == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
+                        streamed_chunks.append(str(chunk.content))
                         yield f"data: {chunk.content}\n\n"
+
+                if kind == "on_chain_end":
+                    output = event.get("data", {}).get("output")
+                    if isinstance(output, dict):
+                        extracted = _extract_last_ai_message(output.get("messages", []))
+                        if extracted:
+                            final_ai_message = extracted
+
+            if final_ai_message:
+                append_session_turn(session_id, request.message, final_ai_message)
+                logger.info(
+                    "FLOW chat.stream_history_saved session_id=%s response_chars=%s",
+                    session_id,
+                    len(final_ai_message),
+                )
+            elif streamed_chunks:
+                fallback_response = "".join(streamed_chunks).strip()
+                if fallback_response:
+                    append_session_turn(session_id, request.message, fallback_response)
+                    logger.info(
+                        "FLOW chat.stream_history_saved_fallback session_id=%s response_chars=%s",
+                        session_id,
+                        len(fallback_response),
+                    )
 
             # Send session_id and end signal
             yield f"event: session_id\ndata: {session_id}\n\n"

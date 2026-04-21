@@ -53,10 +53,10 @@ voice-chatbot/
     │   ├── vad.py                   # Silero VAD (voice activity detection)
     │   └── text_correction.py       # LLM-based spelling correction
     │
-    └── tools/                       # 🔧 Mock Tools (replace with real API/DB later)
-        ├── menu_tools.py            # Mock menu data (10 Vietnamese dishes)
-        ├── order_tools.py           # In-memory cart management
-        └── promotion_tools.py       # Mock promotions & coupons
+    └── tools/                       # 🔧 Agent tools
+      ├── menu_tools.py            # Menu tools backed by MySQL
+      ├── promo_tools.py           # Promotion tools backed by MySQL
+      └── order_tools.py           # In-memory cart management
 ```
 
 ## 🛠️ Requirements
@@ -442,7 +442,8 @@ When caches already exist, the service reuses local files and avoids downloading
 ## 🗄️ Connecting MySQL (When Database is Ready)
 
 1. Fill in database credentials in `.env`
-2. Replace mock tools in `src/tools/` with real SQL queries using `src/database.py`
+2. Data Team already uses DB-backed tools (`src/tools/menu_tools.py`, `src/tools/promo_tools.py`)
+3. Keep Data Team queries read-only (SELECT) through repository/service layers
 
 ---
 

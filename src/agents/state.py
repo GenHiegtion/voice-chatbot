@@ -24,3 +24,7 @@ class AgentState(MessagesState):
 
     # Session ID for cart persistence
     session_id: str = ""
+
+    # Lightweight data-team context for follow-up questions.
+    last_topic: Literal["menu", "promotion", "action", ""] = ""
+    last_product_id: int | None = None

@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
 
 from src.agents.state import AgentState
-from src.tools.menu_tools import get_menu_categories, search_menu, get_dish_details, get_dishes_by_category
+from src.tools import menu_tools
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +21,19 @@ MENU_AGENT_PROMPT = """You are the restaurant menu specialist assistant. Your re
 Use available tools to fetch menu information.
 Respond in Vietnamese, with a friendly and clear tone.
 If a requested dish does not exist, suggest similar alternatives.
+Only answer within menu and dish information scope.
 """
 
 
 def create_menu_agent(llm: BaseChatModel):
     """Create the menu agent using ReAct pattern."""
-    tools = [get_menu_categories, search_menu,
-             get_dish_details, get_dishes_by_category]
+    tools = [
+        menu_tools.get_menu_categories,
+        menu_tools.search_menu,
+        menu_tools.get_dish_details,
+        menu_tools.get_dishes_by_category,
+    ]
+    logger.info("FLOW menu_agent.init tool_count=%s", len(tools))
     agent = create_react_agent(llm, tools, prompt=MENU_AGENT_PROMPT)
     return agent
 
@@ -48,6 +54,7 @@ def create_menu_agent_node(llm: BaseChatModel):
             return {
                 "messages": [AIMessage(content=last_message.content, name="menu_agent")],
                 "next_agent": "FINISH",
+                "last_topic": "menu",
             }
         except Exception:
             logger.error("FLOW menu_agent.failed session_id=%s", session_id, exc_info=True)
@@ -59,6 +66,7 @@ def create_menu_agent_node(llm: BaseChatModel):
                     )
                 ],
                 "next_agent": "FINISH",
+                "last_topic": "menu",
             }
 
     return menu_agent_node

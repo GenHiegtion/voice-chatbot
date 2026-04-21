@@ -94,10 +94,14 @@ async def startup_event() -> None:
     configure_model_cache_environment()
 
     from src.agents.graph import get_graph
+    from src.database import probe_database_connection
 
     # Build graph early to avoid first-request latency.
     get_graph()
     logger.info("Graph initialized")
+
+    db_ready = await probe_database_connection()
+    logger.info("Database probe status=%s", "ready" if db_ready else "unavailable")
 
     if settings.model_preload_on_startup:
         try:
