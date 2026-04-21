@@ -40,6 +40,40 @@ def _parse_router_json(content: str) -> tuple[str, str]:
         return "FINISH", str(content)
 
 
+def _rule_based_fallback_target(flow_name: str, user_text: str, allowed_targets: set[str]) -> str:
+    """Fallback router when LLM is temporarily unavailable."""
+    normalized = " ".join((user_text or "").lower().split())
+
+    if flow_name == "coordinator":
+        action_keywords = [
+            "thêm", "them", "xóa", "xoa", "cập nhật", "cap nhat", "giỏ", "gio", "đặt", "dat", "checkout",
+        ]
+        data_keywords = [
+            "menu", "món", "mon", "giá", "gia", "thực đơn", "thuc don", "khuyến mãi", "khuyen mai", "ưu đãi", "uu dai",
+        ]
+
+        if any(keyword in normalized for keyword in action_keywords) and "action_team" in allowed_targets:
+            return "action_team"
+        if any(keyword in normalized for keyword in data_keywords) and "data_team" in allowed_targets:
+            return "data_team"
+        return "FINISH"
+
+    if flow_name == "data_team":
+        promo_keywords = ["khuyến mãi", "khuyen mai", "ưu đãi", "uu dai", "giảm", "giam", "deal", "discount"]
+        if any(keyword in normalized for keyword in promo_keywords) and "promotion_agent" in allowed_targets:
+            return "promotion_agent"
+        if "menu_agent" in allowed_targets:
+            return "menu_agent"
+        return "FINISH"
+
+    if flow_name == "action_team":
+        if "order_agent" in allowed_targets:
+            return "order_agent"
+        return "FINISH"
+
+    return "FINISH"
+
+
 def create_team_router_node(
     llm: BaseChatModel,
     *,
@@ -57,9 +91,11 @@ def create_team_router_node(
 
         session_id = state.get("session_id", "")
         user_preview = ""
+        latest_user_text = ""
         for msg in reversed(state["messages"]):
             if getattr(msg, "type", "") == "human" and getattr(msg, "content", ""):
                 user_preview = " ".join(str(msg.content).split())[:160]
+                latest_user_text = str(msg.content)
                 break
 
         logger.info(
@@ -76,10 +112,12 @@ def create_team_router_node(
                 break
             except Exception as exc:
                 logger.warning(
-                    "FLOW %s.llm_failed session_id=%s attempt=%s",
+                    "FLOW %s.llm_failed session_id=%s attempt=%s error_type=%s error=%s",
                     flow_name,
                     session_id,
                     attempt,
+                    type(exc).__name__,
+                    str(exc)[:240],
                 )
                 if not _is_expected_provider_error(exc):
                     logger.debug(
@@ -93,7 +131,17 @@ def create_team_router_node(
                     await asyncio.sleep(0.4 * attempt)
 
         if response is None:
-            logger.error("FLOW %s.fallback session_id=%s", flow_name, session_id)
+            fallback_target = _rule_based_fallback_target(flow_name, latest_user_text, allowed_targets)
+            logger.error(
+                "FLOW %s.fallback session_id=%s strategy=rule_based target=%s",
+                flow_name,
+                session_id,
+                fallback_target,
+            )
+
+            if fallback_target != "FINISH":
+                return {"next_agent": fallback_target}
+
             return {
                 "next_agent": "FINISH",
                 "messages": [AIMessage(content=fallback_message)],
