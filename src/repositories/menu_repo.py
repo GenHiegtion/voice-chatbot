@@ -278,3 +278,24 @@ class MenuRepository(ReadOnlyRepository):
     async def get_products_by_category(self, category: str, limit: int = 20) -> list[ProductRecord]:
         logger.info("REPO menu.get_products_by_category.start category=%s limit=%s", category, limit)
         return await self.search_products(category=category, limit=limit)
+
+    async def get_product_image_url(self, product_id: int) -> str | None:
+        """Return the URL of the first image for a product, or None if no image exists."""
+        logger.info("REPO menu.get_product_image_url.start product_id=%s", product_id)
+        stmt = text(
+            """
+            SELECT url
+            FROM product_images
+            WHERE product_id = :product_id
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        )
+        async with self.session() as session:
+            row = (await session.execute(stmt, {"product_id": product_id})).first()
+        if not row:
+            logger.info("REPO menu.get_product_image_url.not_found product_id=%s", product_id)
+            return None
+        url = str(row.url)
+        logger.info("REPO menu.get_product_image_url.found product_id=%s url=%s", product_id, url)
+        return url

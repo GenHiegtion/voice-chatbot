@@ -71,7 +71,7 @@ async def chat(request: ChatRequest):
                 _preview_text(response_text),
             )
             append_session_turn(session_id, user_text, response_text)
-            return ChatResponse(response=response_text, session_id=session_id)
+            return ChatResponse(response=response_text, session_id=session_id, action="None", action_data=None)
 
         logger.info(
             "FLOW chat.graph_invoke_start session_id=%s history_messages=%s",
@@ -84,6 +84,9 @@ async def chat(request: ChatRequest):
             {
                 "messages": graph_messages,
                 "session_id": session_id,
+                "current_cart": request.current_cart,
+                "action": "None",
+                "action_data": None,
             }
         )
 
@@ -92,16 +95,26 @@ async def chat(request: ChatRequest):
         if not response_text:
             response_text = "Sorry, I couldn't process your request. Please try again."
 
+        # Extract cart action fields from graph result.
+        action = result.get("action", "None") or "None"
+        action_data = result.get("action_data")  # None or dict
+
         append_session_turn(session_id, user_text, response_text)
 
         logger.info(
-            "FLOW chat.graph_invoke_done session_id=%s next_agent=%s response=%s",
+            "FLOW chat.graph_invoke_done session_id=%s next_agent=%s action=%s response=%s",
             session_id,
             result.get("next_agent", ""),
+            action,
             _preview_text(response_text),
         )
 
-        return ChatResponse(response=response_text, session_id=session_id)
+        return ChatResponse(
+            response=response_text,
+            session_id=session_id,
+            action=action,
+            action_data=action_data,
+        )
 
     except Exception:
         logger.error(
