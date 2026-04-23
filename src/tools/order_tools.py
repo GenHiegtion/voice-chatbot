@@ -10,6 +10,9 @@ from functools import lru_cache
 from langchain_core.tools import tool
 
 from src.config import get_settings
+from src.repositories.menu_repo import MenuRepository
+
+_menu_repo = MenuRepository()
 
 # --- In-memory session carts (mock) ---
 _carts: dict[str, dict] = {}
@@ -93,23 +96,46 @@ def add_to_cart(session_id: str, dish_name: str, quantity: int = 1) -> str:
     if quantity <= 0:
         return "❌ Số lượng phải lớn hơn 0."
 
-    found = _find_dish(dish_name)
-    if not found:
+    # Look up the actual dish in the database
+    import asyncio
+    try:
+        # Since tools can be called from async contexts, we need to safely run this
+        loop = asyncio.get_event_loop()
+        product = loop.run_until_complete(_menu_repo.get_product_by_id_or_name(dish_name))
+    except Exception:
+        # Fallback if there's an issue with the event loop
+        product = None
+
+    if not product:
         return f"❌ Không tìm thấy món '{dish_name}' trong thực đơn. Vui lòng kiểm tra lại tên món."
 
-    actual_name, price = found
+    actual_name = product.name
+    price = int(product.price)
+    
+    try:
+        loop = asyncio.get_event_loop()
+        image_url = loop.run_until_complete(_menu_repo.get_product_image_url(product.id)) or ""
+    except Exception:
+        image_url = ""
+
     cart = _get_cart(session_id)
 
     # Check if dish already in cart
     for item in cart:
-        if item["name"] == actual_name:
+        if item["id"] == str(product.id):
             item["quantity"] += quantity
             return (
                 f"✅ Đã cập nhật: {actual_name.title()} x{item['quantity']} "
                 f"({_format_price(price * item['quantity'])})"
             )
 
-    cart.append({"name": actual_name, "price": price, "quantity": quantity})
+    cart.append({
+        "id": str(product.id),
+        "name": actual_name, 
+        "price": price, 
+        "quantity": quantity,
+        "url": image_url
+    })
     return f"✅ Đã thêm: {actual_name.title()} x{quantity} ({_format_price(price * quantity)})"
 
 
