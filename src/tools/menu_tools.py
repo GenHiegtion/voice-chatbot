@@ -96,3 +96,13 @@ async def get_dishes_by_category(category: str) -> str:
     except Exception:
         logger.exception("TOOL menu_tools.get_dishes_by_category.failed")
         return "Không thể lọc món theo danh mục lúc này. Bạn vui lòng thử lại sau."
+
+
+@tool
+def transfer_to_order_agent() -> str:
+    """Sử dụng công cụ này ĐỂ CHUYỂN GIAO (HANDOFF) sang order_agent.
+    Gọi công cụ này NGAY LẬP TỨC sau khi bạn đã xác minh món ăn tồn tại
+    và người dùng muốn thêm món đó vào giỏ hàng.
+    """
+    logger.info("TOOL menu_tools.transfer_to_order_agent.called")
+    return "TRANSFER_SIGNAL_SENT"

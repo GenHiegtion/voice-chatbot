@@ -1,6 +1,6 @@
 """Shared state definition for the LangGraph multi-agent workflow."""
 
-from typing import Literal
+from typing import Any, Literal, Optional
 
 from langgraph.graph import MessagesState
 
@@ -28,3 +28,10 @@ class AgentState(MessagesState):
     # Lightweight data-team context for follow-up questions.
     last_topic: Literal["menu", "promotion", "action", ""] = ""
     last_product_id: int | None = None
+
+    # Cart from the App (sent with each request)
+    current_cart: list[dict[str, Any]] = []
+
+    # Output cart action fields
+    action: str = "None"
+    action_data: Optional[list[dict[str, Any]]] = None

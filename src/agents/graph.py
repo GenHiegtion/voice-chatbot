@@ -117,7 +117,7 @@ def build_graph():
         },
     )
 
-    # All sub-agents return to END after processing
+    # Route from menu_agent back to END (it handles cart updates internally)
     graph.add_edge("menu_agent", END)
     graph.add_edge("order_agent", END)
     graph.add_edge("promotion_agent", END)

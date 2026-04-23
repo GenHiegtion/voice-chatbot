@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,14 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         None, description="Session ID to continue a conversation. If not provided, a new session is created."
     )
+    current_cart: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Current cart items from the App. Each item: "
+            '{"id": str, "name": str, "price": int, "quantity": int, "image": str}. '
+            "Empty list if cart is empty."
+        ),
+    )
 
 
 class ChatResponse(BaseModel):
@@ -19,6 +27,18 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="AI assistant response")
     session_id: str = Field(...,
                             description="Session ID for conversation continuity")
+    action: str = Field(
+        default="None",
+        description="Cart action directive. 'UPDATE_CART' when items should be added to cart; 'None' otherwise.",
+    )
+    action_data: Optional[list[dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "Cart items when action='UPDATE_CART'. "
+            'Each item: {"id": str, "name": str, "price": int, "quantity": int, "image": str}. '
+            "null when action is None."
+        ),
+    )
 
 
 # ===== Speech-to-Text =====

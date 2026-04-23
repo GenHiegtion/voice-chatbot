@@ -22,3 +22,8 @@ dependencies = [
     "aiomysql>=0.2",
     "silero-vad>=5.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
