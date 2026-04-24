@@ -32,26 +32,37 @@ def _detect_add_intent(user_text: str) -> bool:
     return any(k in text_lower for k in _ADD_KEYWORDS)
 
 
-def _extract_quantity(user_text: str) -> int:
-    """Extract quantity from user message. Default 1."""
-    m = _QUANTITY_PATTERN.search(user_text)
-    if m:
-        return max(1, int(m.group(1)))
-    return 1
-
-
-def _extract_dish_query(user_text: str) -> str:
-    """Extract the dish name/query from user text, removing add-keywords and quantity."""
+def _extract_multiple_items(user_text: str) -> list[tuple[str, int]]:
+    """Extract multiple items from user text, handling separators like 'và', ','."""
     text = user_text.lower()
+    
     # Remove common filler prefixes
     for kw in _ADD_KEYWORDS:
         text = text.replace(kw, " ")
-    # Remove quantity digits
-    text = _QUANTITY_PATTERN.sub(" ", text)
+        
     # Remove trailing add-to-cart suffixes and filler words
     text = re.sub(r"vào giỏ hàng|vào giỏ|vào cart", "", text)
     text = re.sub(r"\b(cho tôi|cho mình|cho em|cho anh|cho chị|nữa|với|nhé|nha|đi)\b", " ", text)
-    return text.strip()
+    
+    # Split by separators (và, cùng, dấu phẩy)
+    parts = re.split(r",|\b(và|cùng)\b", text)
+    
+    items = []
+    for part in parts:
+        if not part or part.strip() in ("", "và", "cùng", "với"):
+            continue
+        part = part.strip()
+        
+        # Extract quantity
+        m = _QUANTITY_PATTERN.search(part)
+        qty = max(1, int(m.group(1))) if m else 1
+        
+        # Extract dish name
+        dish_name = _QUANTITY_PATTERN.sub(" ", part).strip()
+        if dish_name:
+            items.append((dish_name, qty))
+            
+    return items
 
 
 MENU_AGENT_PROMPT = """You are the restaurant menu specialist assistant. Your responsibilities are to help users:
@@ -117,61 +128,75 @@ def create_menu_agent_node(llm: BaseChatModel):
         # We query the DB directly and add to cart in code.
         # ------------------------------------------------------------------
         if is_add_intent:
-            dish_query = _extract_dish_query(user_text)
-            quantity = _extract_quantity(user_text)
-            if not dish_query:
-                dish_query = user_text  # fallback
+            items_to_add = _extract_multiple_items(user_text)
+            if not items_to_add:
+                items_to_add = [(user_text, 1)]  # fallback
 
             logger.info(
-                "FLOW menu_agent.add_intent_detected session_id=%s dish_query=%s quantity=%s",
-                session_id, dish_query, quantity,
+                "FLOW menu_agent.add_intent_detected session_id=%s items=%s",
+                session_id, items_to_add,
             )
 
-            try:
-                product = await _menu_repo.get_product_by_id_or_name(dish_query)
-            except Exception:
-                logger.exception("FLOW menu_agent.db_lookup_failed session_id=%s", session_id)
-                product = None
+            # Sync current_cart from App into _carts once
+            current_app_cart = list(state.get("current_cart") or [])
+            _carts[session_id] = {
+                "items": current_app_cart,
+                "last_access": time.time(),
+            }
+            cart = _carts[session_id]["items"]
 
-            if product:
+            added_products = []
+
+            for dish_query, quantity in items_to_add:
                 try:
-                    image_url = await _menu_repo.get_product_image_url(product.id) or ""
+                    product = await _menu_repo.get_product_by_id_or_name(dish_query)
                 except Exception:
-                    image_url = ""
+                    logger.exception("FLOW menu_agent.db_lookup_failed session_id=%s", session_id)
+                    product = None
 
-                price = int(product.price)
+                if product:
+                    try:
+                        image_url = await _menu_repo.get_product_image_url(product.id) or ""
+                    except Exception:
+                        image_url = ""
 
-                # Sync current_cart from App into _carts
-                current_app_cart = list(state.get("current_cart") or [])
-                _carts[session_id] = {
-                    "items": current_app_cart,
-                    "last_access": time.time(),
-                }
-                cart = _carts[session_id]["items"]
+                    price = int(product.price)
 
-                # Merge: update quantity if same product already in cart
-                found = False
-                for item in cart:
-                    if item.get("id") == str(product.id):
-                        item["quantity"] += quantity
-                        found = True
-                        break
-                if not found:
-                    cart.append({
-                        "id": str(product.id),
-                        "name": product.name,
-                        "price": price,
-                        "quantity": quantity,
-                        "url": image_url,
-                    })
+                    # Merge: update quantity if same product already in cart
+                    found = False
+                    for item in cart:
+                        if item.get("id") == str(product.id):
+                            item["quantity"] += quantity
+                            found = True
+                            break
+                    if not found:
+                        cart.append({
+                            "id": str(product.id),
+                            "name": product.name,
+                            "price": price,
+                            "quantity": quantity,
+                            "image": image_url,
+                        })
 
-                logger.info(
-                    "FLOW menu_agent.cart_updated session_id=%s product=%s quantity=%s cart_size=%s",
-                    session_id, product.name, quantity, len(cart),
-                )
+                    added_products.append((product, quantity))
+                    logger.info(
+                        "FLOW menu_agent.cart_updated session_id=%s product=%s quantity=%s cart_size=%s",
+                        session_id, product.name, quantity, len(cart),
+                    )
+                else:
+                    logger.info(
+                        "FLOW menu_agent.product_not_found session_id=%s query=%s",
+                        session_id, dish_query,
+                    )
+
+            if added_products:
+                # Successfully added at least 1 item
+                parts = [f"{q} {p.name}" for p, q in added_products]
+                added_str = " và ".join(parts)
+                
                 return {
                     "messages": [AIMessage(
-                        content=f"Tôi đã thêm {quantity} {product.name} vào giỏ hàng cho bạn rồi nhé! 🛒",
+                        content=f"Tôi đã thêm {added_str} vào giỏ hàng cho bạn rồi nhé! 🛒",
                         name="menu_agent",
                     )],
                     "next_agent": "FINISH",
@@ -179,13 +204,8 @@ def create_menu_agent_node(llm: BaseChatModel):
                     "action": "UPDATE_CART",
                     "action_data": list(cart),
                 }
-            else:
-                # Dish not found: let LLM respond with a helpful error/suggestion
-                logger.info(
-                    "FLOW menu_agent.product_not_found session_id=%s query=%s",
-                    session_id, dish_query,
-                )
-                # Fall through to LLM
+            
+            # If nothing was found, fall through to let LLM respond naturally
 
         # ------------------------------------------------------------------
         # SLOW PATH: Pure information query — let LLM handle via ReAct
