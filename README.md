@@ -353,7 +353,7 @@ Mobile App
 | `CORRECTION_LLM_PROVIDER` | Provider for ASR correction | `ollama` |
 | `CORRECTION_MODEL` | Model for STT correction | `llama3` |
 
-### Ollama (Future — Mac Mini with MPS)
+### Ollama
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -419,7 +419,7 @@ When caches already exist, the service reuses local files and avoids downloading
 
 ---
 
-## 🔄 Switching to Ollama (Mac Mini)
+## 🔄 Switching to Ollama
 
 1. [Install Ollama](https://ollama.com/) and pull a model:
    ```bash

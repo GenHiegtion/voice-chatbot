@@ -75,6 +75,7 @@ def create_menu_agent(llm: BaseChatModel):
         menu_tools.search_menu,
         menu_tools.get_dish_details,
         menu_tools.get_dishes_by_category,
+        menu_tools.get_best_selling_products,
     ]
     logger.info("FLOW menu_agent.init tool_count=%s", len(tools))
     agent = create_react_agent(llm, tools, prompt=MENU_AGENT_PROMPT)
