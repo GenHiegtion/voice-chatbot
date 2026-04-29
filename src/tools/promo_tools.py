@@ -14,7 +14,7 @@ _service = PromotionService()
 
 @tool
 async def get_active_promotions() -> str:
-    """Lấy danh sách ưu đãi đang còn hiệu lực."""
+    """Fetch active promotions."""
     logger.info("TOOL promo_tools.get_active_promotions.start")
     try:
         result = await _service.get_active_promotions()
@@ -30,7 +30,7 @@ async def get_active_promotions() -> str:
 
 @tool
 async def check_promotion_for_dish(dish_name_or_id: str) -> str:
-    """Kiểm tra ưu đãi đang áp dụng cho một món cụ thể."""
+    """Check active promotions for a specific dish."""
     logger.info("TOOL promo_tools.check_promotion_for_dish.start ref=%s", dish_name_or_id)
     try:
         result = await _service.check_promotion_for_dish(dish_name_or_id)
@@ -46,7 +46,7 @@ async def check_promotion_for_dish(dish_name_or_id: str) -> str:
 
 @tool
 async def get_best_deals(limit: int = 5) -> str:
-    """Lấy danh sách món có mức ưu đãi tốt nhất."""
+    """Get the list of dishes with the best deals."""
     logger.info("TOOL promo_tools.get_best_deals.start limit=%s", limit)
     try:
         result = await _service.get_best_deals(limit=limit)

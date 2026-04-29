@@ -86,12 +86,12 @@ def _find_dish(name: str) -> tuple[str, int] | None:
 
 @tool
 def add_to_cart(session_id: str, dish_name: str, quantity: int = 1) -> str:
-    """Thêm món ăn vào giỏ hàng.
+    """Add a dish to the cart.
 
     Args:
-        session_id: ID phiên chat của người dùng
-        dish_name: Tên món ăn cần thêm
-        quantity: Số lượng (mặc định 1)
+        session_id: User session ID
+        dish_name: Dish name to add
+        quantity: Quantity (default 1)
     """
     if quantity <= 0:
         return "❌ Số lượng phải lớn hơn 0."
@@ -141,11 +141,11 @@ def add_to_cart(session_id: str, dish_name: str, quantity: int = 1) -> str:
 
 @tool
 def remove_from_cart(session_id: str, dish_name: str) -> str:
-    """Xóa một món ăn khỏi giỏ hàng.
+    """Remove a dish from the cart.
 
     Args:
-        session_id: ID phiên chat của người dùng
-        dish_name: Tên món ăn cần xóa
+        session_id: User session ID
+        dish_name: Dish name to remove
     """
     cart = _get_cart(session_id)
     dish_name_lower = dish_name.lower()
@@ -160,10 +160,10 @@ def remove_from_cart(session_id: str, dish_name: str) -> str:
 
 @tool
 def view_cart(session_id: str) -> str:
-    """Xem nội dung giỏ hàng hiện tại.
+    """View current cart contents.
 
     Args:
-        session_id: ID phiên chat của người dùng
+        session_id: User session ID
     """
     cart = _get_cart(session_id)
 
@@ -182,12 +182,12 @@ def view_cart(session_id: str) -> str:
 
 @tool
 def update_cart_quantity(session_id: str, dish_name: str, quantity: int) -> str:
-    """Cập nhật số lượng của một món trong giỏ hàng.
+    """Update the quantity for a dish in the cart.
 
     Args:
-        session_id: ID phiên chat của người dùng
-        dish_name: Tên món ăn cần cập nhật
-        quantity: Số lượng mới (đặt 0 để xóa)
+        session_id: User session ID
+        dish_name: Dish name to update
+        quantity: New quantity (set 0 to remove)
     """
     if quantity < 0:
         return "❌ Số lượng không được âm."
@@ -211,12 +211,12 @@ def update_cart_quantity(session_id: str, dish_name: str, quantity: int) -> str:
 
 @tool
 def place_order(session_id: str, delivery_address: str = "", note: str = "") -> str:
-    """Xác nhận đặt hàng với giỏ hàng hiện tại.
+    """Place an order with the current cart.
 
     Args:
-        session_id: ID phiên chat của người dùng
-        delivery_address: Địa chỉ giao hàng
-        note: Ghi chú cho đơn hàng (ví dụ: không hành, ít cay)
+        session_id: User session ID
+        delivery_address: Delivery address
+        note: Order note (for example: no onions, less spicy)
     """
     cart = _get_cart(session_id)
 

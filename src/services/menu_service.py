@@ -103,3 +103,9 @@ class MenuService:
         products = await self._menu_repo.get_products_by_category(category)
         logger.info("SERVICE menu.get_dishes_by_category.repo_result count=%s", len(products))
         return format_products(products, title=f"Các món trong danh mục '{category}':")
+
+    async def get_best_selling_products(self, limit: int = 5) -> str:
+        logger.info("SERVICE menu.get_best_selling_products.start limit=%s", limit)
+        products = await self._menu_repo.get_best_selling_products(limit)
+        logger.info("SERVICE menu.get_best_selling_products.repo_result count=%s", len(products))
+        return format_products(products, title="Top món bán chạy nhất:")

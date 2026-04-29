@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.db_schema import Catalog, Product
+from src.db_schema import Catalog, Product, OrderItem
 
 from .base_repo import ReadOnlyRepository
 from .records import CategoryRecord, ProductRecord
@@ -299,3 +299,46 @@ class MenuRepository(ReadOnlyRepository):
         url = str(row.url)
         logger.info("REPO menu.get_product_image_url.found product_id=%s url=%s", product_id, url)
         return url
+
+    async def get_best_selling_products(self, limit: int = 5) -> list[ProductRecord]:
+        logger.info("REPO menu.get_best_selling_products.start limit=%s", limit)
+        stmt = (
+            select(
+                Product.id,
+                Product.name,
+                Product.description,
+                Product.price,
+                Product.is_selling,
+                Catalog.id.label("category_id"),
+                Catalog.name.label("category_name"),
+            )
+            .join(Catalog, Catalog.id == Product.catalog_id)
+            .join(OrderItem, OrderItem.product_id == Product.id)
+            .where(Product.is_selling.is_(True))
+            .group_by(
+                Product.id,
+                Product.name,
+                Product.description,
+                Product.price,
+                Product.is_selling,
+                Catalog.id,
+                Catalog.name,
+            )
+            .order_by(func.sum(OrderItem.quantity).desc())
+            .limit(max(1, min(limit, 20)))
+        )
+        async with self.session() as session:
+            rows = (await session.execute(stmt)).all()
+        logger.info("REPO menu.get_best_selling_products.done count=%s", len(rows))
+        return [
+            ProductRecord(
+                id=row.id,
+                name=row.name,
+                description=row.description or "",
+                price=row.price,
+                is_selling=bool(row.is_selling),
+                category_id=row.category_id,
+                category_name=row.category_name,
+            )
+            for row in rows
+        ]

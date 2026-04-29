@@ -18,7 +18,7 @@ def _optional_price(value: int) -> int | None:
 
 @tool
 async def get_menu_categories() -> str:
-    """Lấy danh sách danh mục món ăn từ cơ sở dữ liệu."""
+    """Fetch menu categories from the database."""
     logger.info("TOOL menu_tools.get_menu_categories.start")
     try:
         result = await _service.get_menu_categories()
@@ -34,13 +34,13 @@ async def get_menu_categories() -> str:
 
 @tool
 async def search_menu(query: str, category: str = "", min_price: int = 0, max_price: int = 0) -> str:
-    """Tìm món theo từ khóa, danh mục và khoảng giá.
+    """Search dishes by keyword, category, and price range.
 
     Args:
-        query: Từ khóa tìm kiếm món ăn
-        category: Danh mục món (không bắt buộc)
-        min_price: Giá tối thiểu VND (không bắt buộc)
-        max_price: Giá tối đa VND (không bắt buộc)
+        query: Search keyword for dishes
+        category: Dish category (optional)
+        min_price: Minimum price in VND (optional)
+        max_price: Maximum price in VND (optional)
     """
     logger.info(
         "TOOL menu_tools.search_menu.start query=%s category=%s min_price=%s max_price=%s",
@@ -68,7 +68,7 @@ async def search_menu(query: str, category: str = "", min_price: int = 0, max_pr
 
 @tool
 async def get_dish_details(dish_name_or_id: str) -> str:
-    """Lấy thông tin chi tiết món ăn theo tên hoặc ID."""
+    """Get dish details by name or ID."""
     logger.info("TOOL menu_tools.get_dish_details.start ref=%s", dish_name_or_id)
     try:
         result = await _service.get_dish_details(dish_name_or_id)
@@ -84,7 +84,7 @@ async def get_dish_details(dish_name_or_id: str) -> str:
 
 @tool
 async def get_dishes_by_category(category: str) -> str:
-    """Lấy danh sách món đang bán theo danh mục."""
+    """Get currently selling dishes by category."""
     logger.info("TOOL menu_tools.get_dishes_by_category.start category=%s", category)
     try:
         result = await _service.get_dishes_by_category(category)
@@ -100,9 +100,28 @@ async def get_dishes_by_category(category: str) -> str:
 
 @tool
 def transfer_to_order_agent() -> str:
-    """Sử dụng công cụ này ĐỂ CHUYỂN GIAO (HANDOFF) sang order_agent.
-    Gọi công cụ này NGAY LẬP TỨC sau khi bạn đã xác minh món ăn tồn tại
-    và người dùng muốn thêm món đó vào giỏ hàng.
+    """Use this tool to HAND OFF to order_agent.
+    Call this tool immediately after you have verified the dish exists
+    and the user wants to add it to the cart.
     """
     logger.info("TOOL menu_tools.transfer_to_order_agent.called")
     return "TRANSFER_SIGNAL_SENT"
+
+@tool
+async def get_best_selling_products(limit: int = 5) -> str:
+    """Get the list of best-selling dishes.
+    
+    Args:
+        limit: Number of items to return (default 5, max 20)
+    """
+    logger.info("TOOL menu_tools.get_best_selling_products.start limit=%s", limit)
+    try:
+        result = await _service.get_best_selling_products(limit)
+        logger.info("TOOL menu_tools.get_best_selling_products.success chars=%s", len(result))
+        return result
+    except RuntimeError as exc:
+        logger.warning("TOOL menu_tools.get_best_selling_products.db_unavailable error=%s", exc)
+        return "Hiện chưa cấu hình kết nối cơ sở dữ liệu để lấy danh sách món bán chạy."
+    except Exception:
+        logger.exception("TOOL menu_tools.get_best_selling_products.failed")
+        return "Không thể lấy danh sách món bán chạy lúc này. Bạn vui lòng thử lại sau."
