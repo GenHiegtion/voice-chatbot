@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     app_timezone: str = "Asia/Ho_Chi_Minh"
 
+    # Redis (session history)
+    redis_enabled: bool = False
+    redis_url: str = ""
+    redis_ttl_seconds: int = 3600
+
     # Database (MySQL) — leave empty if not using database yet
     db_host: str = ""
     db_port: int = 3306

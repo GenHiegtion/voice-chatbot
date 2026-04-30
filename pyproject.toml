@@ -21,6 +21,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "aiomysql>=0.2",
     "silero-vad>=5.1",
+    "redis>=5.0",
 ]
 
 [dependency-groups]
