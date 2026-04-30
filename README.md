@@ -13,57 +13,35 @@ This project provides two core services:
 
 ```
 voice-chatbot/
+├── docker/
+│   ├── Dockerfile
+│   └── docker-compose.yml
 ├── main.py                          # Entry point — FastAPI application
 ├── pyproject.toml                   # Dependencies & project metadata
 ├── .env                             # Environment variables (API keys, config)
 ├── .env.example                     # Template for .env
 ├── scripts/
-│   └── export_graph.py              # Export LangGraph architecture as PNG
-│
+│   ├── export_graph.py              # Export LangGraph architecture as PNG
+│   └── redeploy.sh                  # Rebuild + redeploy Docker Compose
 ├── statics/                         # Architecture diagrams
 │   ├── overview_graph.png
 │   └── detailed_graph.png
-│
 └── src/                             # Main source code
     ├── __init__.py
     ├── config.py                    # Settings (LLM, DB, VAD, Server)
-    ├── database.py                  # MySQL async connection (prepared)
-    │
+    ├── database.py                  # MySQL async connection
     ├── agents/                      # 🤖 Multi-Agent System (LangGraph)
-    │   ├── state.py                 # Shared state (messages, session_id)
-    │   ├── coordinator.py           # Top coordinator — route to team layer
-    │   ├── menu_agent.py            # Menu agent — search dishes, view details
-    │   ├── order_agent.py           # Order agent — cart management, checkout
-    │   ├── promotion_agent.py       # Promotion agent — coupons, deals
-    │   └── graph.py                 # LangGraph workflow definition
-    │
     ├── teams/                       # 👥 Team routers
-    │   ├── action_team.py           # Action team router — route order actions
-    │   ├── data_team.py             # Data team router — route info queries
-    │   └── team_router.py           # Shared reusable router logic
-    │
     ├── api/                         # 🌐 FastAPI Routes & Schemas
-    │   ├── schemas.py               # Pydantic models (request/response)
-    │   └── routes/
-    │       ├── chat.py              # POST /api/chat, /api/chat/stream
-    │       └── speech.py            # POST /api/speech-to-text, /api/voice-chat
-    │
     ├── speech/                      # 🎙️ Speech Processing Pipeline
-    │   ├── asr.py                   # ChunkFormer ASR (Vietnamese STT)
-    │   ├── vad.py                   # Silero VAD (voice activity detection)
-    │   └── text_correction.py       # LLM-based spelling correction
-    │
     └── tools/                       # 🔧 Agent tools
-      ├── menu_tools.py            # Menu tools backed by MySQL
-      ├── promo_tools.py           # Promotion tools backed by MySQL
-      └── order_tools.py           # In-memory cart management
 ```
 
 ## 🛠️ Requirements
 
 - **Python** >= 3.12
 - **uv** (Python package manager) — [Installation guide](https://docs.astral.sh/uv/getting-started/installation/)
-- **OpenRouter API Key** (current) or **Ollama** (future)
+- **OpenRouter API Key** or **Ollama**
 
 ## ⚡ Setup & Run
 
@@ -73,17 +51,35 @@ voice-chatbot/
 git clone <repo-url>
 cd voice-chatbot
 cp .env.example .env
-# Edit .env and fill in your OPENROUTER_API_KEY
+# Edit .env and fill in your OPENROUTER_API_KEY (or Ollama config)
 ```
 
 ### 2. Install & start
 
+### 2a. Local
+
 ```bash
 uv sync
-uv run uvicorn main:app --host localhost --port 8000 > api.log 2>&1
+uv run uvicorn main:app --host localhost --port 8001 > api.log 2>&1
 ```
 
-Server runs at: `http://localhost:8000`
+Server runs at: `http://localhost:8001`
+
+### 2b. Docker
+
+```bash
+cp .env.example .env
+# Set DB_* and MYSQL_ROOT_PASSWORD values
+./scripts/redeploy.sh
+```
+
+Docker Compose automatically enables Redis (overrides `REDIS_ENABLED=true`) for chat history.
+
+Rebuild and redeploy quickly:
+
+```bash
+bash scripts/redeploy.sh
+```
 
 ### 3. API Documentation
 
@@ -146,7 +142,7 @@ Response returned to user
 │ Audio Input │───▶│ Silero VAD│───▶│ ChunkFormer │───▶│    LLM     │───▶│  Output   │
 │             │    │           │    │    ASR      │    │ Correction │    │   Text    │
 │ WAV/MP3/    │    │ Filter    │    │ Vietnamese  │    │ Fix typos  │    │ Corrected │
-│ OGG/FLAC   │    │ speech    │    │ recognition │    │ & diacrit  │    │ Vietnamese│
+│ OGG/FLAC    │    │ speech    │    │ recognition │    │ and accents│    │ Vietnamese│
 └─────────────┘    └───────────┘    └─────────────┘    └────────────┘    └───────────┘
 ```
 
@@ -187,8 +183,8 @@ Send a text message and receive an AI response through the multi-agent system.
 
 | Request Field | Type | Required | Description |
 |---------------|------|----------|-------------|
-| `message` | string | ✅ | User's message (Vietnamese) |
-| `session_id` | string | ❌ | Session ID for cart persistence |
+| `message` | string | ✅ | User message |
+| `session_id` | string | ❌ | Session ID for multi-turn context |
 
 | Response Field | Type | Description |
 |----------------|------|-------------|
@@ -376,6 +372,14 @@ Mobile App
 | `MODEL_PRELOAD_ON_STARTUP` | Preload ASR/VAD models at startup | `false` |
 | `LOG_LEVEL` | App log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
 
+### Redis (Chat History)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REDIS_ENABLED` | Enable Redis-backed chat history | `false` |
+| `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
+| `REDIS_TTL_SECONDS` | History TTL in seconds | `3600` |
+
 ### Database (MySQL)
 
 | Variable | Description | Default |
@@ -386,7 +390,7 @@ Mobile App
 | `DB_PASSWORD` | MySQL password | _(empty)_ |
 | `DB_NAME` | Database name | _(empty)_ |
 
-> **Note:** Database is not connected yet. The chatbot uses mock data in `src/tools/`. When MySQL is ready, fill in credentials and replace mock functions with real queries (see `src/database.py`).
+> **Note:** Set `DB_*` to connect the service to MySQL. If these are empty, database-backed features will be unavailable.
 
 ### Server
 
@@ -439,7 +443,7 @@ When caches already exist, the service reuses local files and avoids downloading
 
 ---
 
-## 🗄️ Connecting MySQL (When Database is Ready)
+## 🗄️ Connecting MySQL
 
 1. Fill in database credentials in `.env`
 2. Data Team already uses DB-backed tools (`src/tools/menu_tools.py`, `src/tools/promo_tools.py`)
@@ -466,10 +470,10 @@ After starting the server, open `http://localhost:8000/docs`:
 |-----------|-----------|
 | Web Framework | FastAPI + Uvicorn |
 | Multi-Agent System | LangGraph + LangChain |
-| LLM Provider | OpenRouter (current) / Ollama (future) |
+| LLM Provider | OpenRouter / Ollama |
 | Vietnamese ASR | ChunkFormer (`khanhld/chunkformer-ctc-large-vie`) |
 | Voice Activity Detection | Silero VAD |
-| Database (future) | MySQL + SQLAlchemy + aiomysql |
+| Database | MySQL + SQLAlchemy + aiomysql |
 | Package Manager | uv |
 
 ---
