@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     redis_url: str = ""
     redis_ttl_seconds: int = 3600
 
+    # MCP server
+    mcp_enabled: bool = False
+    mcp_transport: Literal["http", "streamable-http"] = "http"
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 8002
+    mcp_auth_token: str = ""
+    mcp_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    # Tool provider
+    tool_provider: Literal["local", "mcp"] = "local"
+
     # Database (MySQL) — leave empty if not using database yet
     db_host: str = ""
     db_port: int = 3306

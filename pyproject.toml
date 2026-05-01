@@ -22,6 +22,7 @@ dependencies = [
     "aiomysql>=0.2",
     "silero-vad>=5.1",
     "redis>=5.0",
+    "mcp>=1.0.0",
 ]
 
 [dependency-groups]
