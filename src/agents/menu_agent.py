@@ -11,7 +11,8 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
 
 from src.agents.state import AgentState
-from src.tools import menu_tools
+from src.tools.provider import get_menu_tools
+from src.tools.tool_context import tool_context
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,7 @@ Only answer within menu and dish information scope.
 
 def create_menu_agent(llm: BaseChatModel):
     """Create the menu agent using ReAct pattern."""
-    tools = [
-        menu_tools.get_menu_categories,
-        menu_tools.search_menu,
-        menu_tools.get_dish_details,
-        menu_tools.get_dishes_by_category,
-        menu_tools.get_best_selling_products,
-    ]
+    tools = get_menu_tools()
     logger.info("FLOW menu_agent.init tool_count=%s", len(tools))
     agent = create_react_agent(llm, tools, prompt=MENU_AGENT_PROMPT)
     return agent
@@ -113,124 +108,125 @@ def create_menu_agent_node(llm: BaseChatModel):
         """
         session_id = state.get("session_id", "")
         logger.info("FLOW menu_agent.start session_id=%s", session_id)
+        current_app_cart = list(state.get("current_cart") or [])
 
-        # Get original user message
-        user_text = ""
-        for msg in reversed(state.get("messages", [])):
-            if getattr(msg, "type", "") == "human":
-                user_text = msg.content
-                break
+        with tool_context(session_id, current_app_cart):
+            # Get original user message
+            user_text = ""
+            for msg in reversed(state.get("messages", [])):
+                if getattr(msg, "type", "") == "human":
+                    user_text = msg.content
+                    break
 
-        is_add_intent = _detect_add_intent(user_text)
+            is_add_intent = _detect_add_intent(user_text)
 
-        # ------------------------------------------------------------------
-        # FAST PATH: Deterministic add-to-cart
-        # Don't rely on LLM to call search + transfer tools. 
-        # We query the DB directly and add to cart in code.
-        # ------------------------------------------------------------------
-        if is_add_intent:
-            items_to_add = _extract_multiple_items(user_text)
-            if not items_to_add:
-                items_to_add = [(user_text, 1)]  # fallback
+            # ------------------------------------------------------------------
+            # FAST PATH: Deterministic add-to-cart
+            # Don't rely on LLM to call search + transfer tools.
+            # We query the DB directly and add to cart in code.
+            # ------------------------------------------------------------------
+            if is_add_intent:
+                items_to_add = _extract_multiple_items(user_text)
+                if not items_to_add:
+                    items_to_add = [(user_text, 1)]  # fallback
 
-            logger.info(
-                "FLOW menu_agent.add_intent_detected session_id=%s items=%s",
-                session_id, items_to_add,
-            )
+                logger.info(
+                    "FLOW menu_agent.add_intent_detected session_id=%s items=%s",
+                    session_id, items_to_add,
+                )
 
-            # Sync current_cart from App into _carts once
-            current_app_cart = list(state.get("current_cart") or [])
-            _carts[session_id] = {
-                "items": current_app_cart,
-                "last_access": time.time(),
-            }
-            cart = _carts[session_id]["items"]
-
-            added_products = []
-
-            for dish_query, quantity in items_to_add:
-                try:
-                    product = await _menu_repo.get_product_by_id_or_name(dish_query)
-                except Exception:
-                    logger.exception("FLOW menu_agent.db_lookup_failed session_id=%s", session_id)
-                    product = None
-
-                if product:
-                    try:
-                        image_url = await _menu_repo.get_product_image_url(product.id) or ""
-                    except Exception:
-                        image_url = ""
-
-                    price = int(product.price)
-
-                    # Merge: update quantity if same product already in cart
-                    found = False
-                    for item in cart:
-                        if item.get("id") == str(product.id):
-                            item["quantity"] += quantity
-                            found = True
-                            break
-                    if not found:
-                        cart.append({
-                            "id": str(product.id),
-                            "name": product.name,
-                            "price": price,
-                            "quantity": quantity,
-                            "image": image_url,
-                        })
-
-                    added_products.append((product, quantity))
-                    logger.info(
-                        "FLOW menu_agent.cart_updated session_id=%s product=%s quantity=%s cart_size=%s",
-                        session_id, product.name, quantity, len(cart),
-                    )
-                else:
-                    logger.info(
-                        "FLOW menu_agent.product_not_found session_id=%s query=%s",
-                        session_id, dish_query,
-                    )
-
-            if added_products:
-                # Successfully added at least 1 item
-                parts = [f"{q} {p.name}" for p, q in added_products]
-                added_str = " và ".join(parts)
-                
-                return {
-                    "messages": [AIMessage(
-                        content=f"Tôi đã thêm {added_str} vào giỏ hàng cho bạn rồi nhé! 🛒",
-                        name="menu_agent",
-                    )],
-                    "next_agent": "FINISH",
-                    "last_topic": "action",
-                    "action": "UPDATE_CART",
-                    "action_data": list(cart),
+                # Sync current_cart from App into _carts once
+                _carts[session_id] = {
+                    "items": current_app_cart,
+                    "last_access": time.time(),
                 }
-            
-            # If nothing was found, fall through to let LLM respond naturally
+                cart = _carts[session_id]["items"]
 
-        # ------------------------------------------------------------------
-        # SLOW PATH: Pure information query — let LLM handle via ReAct
-        # ------------------------------------------------------------------
-        try:
-            result = await agent.ainvoke({"messages": state["messages"]})
-            last_message = result["messages"][-1]
-            logger.info("FLOW menu_agent.done session_id=%s next_agent=FINISH", session_id)
-            return {
-                "messages": [AIMessage(content=last_message.content, name="menu_agent")],
-                "next_agent": "FINISH",
-                "last_topic": "menu",
-            }
-        except Exception:
-            logger.error("FLOW menu_agent.failed session_id=%s", session_id, exc_info=True)
-            return {
-                "messages": [
-                    AIMessage(
-                        content="Xin lỗi, mình chưa thể xử lý yêu cầu thực đơn lúc này. Bạn vui lòng thử lại sau nhé.",
-                        name="menu_agent",
-                    )
-                ],
-                "next_agent": "FINISH",
-                "last_topic": "menu",
-            }
+                added_products = []
+
+                for dish_query, quantity in items_to_add:
+                    try:
+                        product = await _menu_repo.get_product_by_id_or_name(dish_query)
+                    except Exception:
+                        logger.exception("FLOW menu_agent.db_lookup_failed session_id=%s", session_id)
+                        product = None
+
+                    if product:
+                        try:
+                            image_url = await _menu_repo.get_product_image_url(product.id) or ""
+                        except Exception:
+                            image_url = ""
+
+                        price = int(product.price)
+
+                        # Merge: update quantity if same product already in cart
+                        found = False
+                        for item in cart:
+                            if item.get("id") == str(product.id):
+                                item["quantity"] += quantity
+                                found = True
+                                break
+                        if not found:
+                            cart.append({
+                                "id": str(product.id),
+                                "name": product.name,
+                                "price": price,
+                                "quantity": quantity,
+                                "image": image_url,
+                            })
+
+                        added_products.append((product, quantity))
+                        logger.info(
+                            "FLOW menu_agent.cart_updated session_id=%s product=%s quantity=%s cart_size=%s",
+                            session_id, product.name, quantity, len(cart),
+                        )
+                    else:
+                        logger.info(
+                            "FLOW menu_agent.product_not_found session_id=%s query=%s",
+                            session_id, dish_query,
+                        )
+
+                if added_products:
+                    # Successfully added at least 1 item
+                    parts = [f"{q} {p.name}" for p, q in added_products]
+                    added_str = " và ".join(parts)
+
+                    return {
+                        "messages": [AIMessage(
+                            content=f"Tôi đã thêm {added_str} vào giỏ hàng cho bạn rồi nhé! 🛒",
+                            name="menu_agent",
+                        )],
+                        "next_agent": "FINISH",
+                        "last_topic": "action",
+                        "action": "UPDATE_CART",
+                        "action_data": list(cart),
+                    }
+
+                # If nothing was found, fall through to let LLM respond naturally
+
+            # ------------------------------------------------------------------
+            # SLOW PATH: Pure information query — let LLM handle via ReAct
+            # ------------------------------------------------------------------
+            try:
+                result = await agent.ainvoke({"messages": state["messages"]})
+                last_message = result["messages"][-1]
+                logger.info("FLOW menu_agent.done session_id=%s next_agent=FINISH", session_id)
+                return {
+                    "messages": [AIMessage(content=last_message.content, name="menu_agent")],
+                    "next_agent": "FINISH",
+                    "last_topic": "menu",
+                }
+            except Exception:
+                logger.error("FLOW menu_agent.failed session_id=%s", session_id, exc_info=True)
+                return {
+                    "messages": [
+                        AIMessage(
+                            content="Xin lỗi, mình chưa thể xử lý yêu cầu thực đơn lúc này. Bạn vui lòng thử lại sau nhé.",
+                            name="menu_agent",
+                        )
+                    ],
+                    "next_agent": "FINISH",
+                    "last_topic": "menu",
+                }
 
     return menu_agent_node
