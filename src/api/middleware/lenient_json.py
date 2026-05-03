@@ -115,7 +115,7 @@ class LenientJSONMiddleware:
         async def receive_once() -> Message:
             nonlocal sent_once
             if sent_once:
-                return {"type": "http.request", "body": b"", "more_body": False}
+                return await receive()
             sent_once = True
             return {"type": "http.request", "body": raw_body, "more_body": False}
 
