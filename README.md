@@ -201,20 +201,22 @@ curl -X POST http://localhost:8000/api/chat \
 
 ### `POST /api/chat/stream` — Streaming Chat (SSE)
 
-Same as `/api/chat` but returns Server-Sent Events for real-time token streaming.
+Same as `/api/chat` but returns Server-Sent Events with JSON payloads.
 
 **Request:** Same as `/api/chat`
 
 **Response:** `text/event-stream`
 ```
-data: Dạ,
-data:  nhà hàng
-data:  có các
-data:  danh mục...
-event: session_id
-data: user-123
+event: meta
+data: {"session_id": "user-123", "request_id": "req-abc"}
+event: token
+data: {"text": "Dạ,"}
+event: token
+data: {"text": " nhà hàng"}
+event: final
+data: {"response": "Dạ, nhà hàng có các danh mục...", "action": "None", "action_data": null, "session_id": "user-123"}
 event: done
-data: [DONE]
+data: {"done": true}
 ```
 
 ```bash
@@ -285,6 +287,38 @@ Upload audio → transcribe → send to chatbot → return both transcript and A
 
 ```bash
 curl -X POST http://localhost:8000/api/voice-chat \
+  -F "audio=@recording.wav" \
+  -F "session_id=user-123"
+```
+
+---
+
+### `POST /api/voice-chat/stream` — Voice Chat Streaming (SSE)
+
+Stream progress + chatbot tokens while processing a voice request.
+
+**Request:** `multipart/form-data` (same as `/api/voice-chat`)
+
+**Response:** `text/event-stream`
+```
+event: meta
+data: {"session_id": "user-123", "request_id": "req-abc"}
+event: progress
+data: {"stage": "asr", "status": "start"}
+event: progress
+data: {"stage": "asr", "status": "done"}
+event: progress
+data: {"stage": "correction", "status": "done"}
+event: token
+data: {"text": "Dạ,"}
+event: final
+data: {"original_text": "cho toi xem menu", "corrected_text": "Cho toi xem menu", "response": "Dạ, nhà hàng có các danh mục...", "action": "None", "action_data": null, "session_id": "user-123"}
+event: done
+data: {"done": true}
+```
+
+```bash
+curl -N -X POST http://localhost:8000/api/voice-chat/stream \
   -F "audio=@recording.wav" \
   -F "session_id=user-123"
 ```
