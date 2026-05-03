@@ -4,10 +4,12 @@ import uuid
 import logging
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from src.api.schemas import SpeechToTextResponse, VoiceChatResponse
+from src.api.sse import SSE_HEADERS, sse_event, stream_sse
 from src.agents.graph import get_graph
 from src.speech.asr import transcribe_audio
 from src.speech.text_correction import correct_text
@@ -175,3 +177,127 @@ async def voice_chat(
         logger.error("FLOW voice_chat.request_failed session_id=%s", session_id or "", exc_info=True)
         raise HTTPException(
             status_code=500, detail="Voice chat failed")
+
+
+@router.post(
+    "/voice-chat/stream",
+    summary="Voice chat with streaming response",
+    description="Upload an audio file and receive progress + chat response via Server-Sent Events (SSE).",
+)
+async def voice_chat_stream(
+    request: Request,
+    audio: UploadFile = File(..., description="Audio file (WAV, MP3, OGG, FLAC)"),
+    session_id: str = Query(
+        None, description="Session ID to continue an existing conversation"
+    ),
+):
+    """Full voice chat with SSE: audio → text → chatbot → streamed response."""
+    session_id = session_id or str(uuid.uuid4())
+    request_id = str(uuid.uuid4())
+
+    audio_bytes = await audio.read()
+    logger.info(
+        "FLOW voice_chat.stream_request_received session_id=%s upload_name=%s size_bytes=%s",
+        session_id,
+        audio.filename or "",
+        len(audio_bytes),
+    )
+
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file")
+
+    async def event_source():
+        try:
+            yield sse_event("meta", {"session_id": session_id, "request_id": request_id})
+
+            yield sse_event("progress", {"stage": "asr", "status": "start"})
+            original_text = await transcribe_audio(audio_bytes)
+            if not original_text:
+                yield sse_event(
+                    "error",
+                    {"message": "Could not transcribe audio. Please try again."},
+                )
+                yield sse_event("done", {"done": True})
+                return
+            yield sse_event("progress", {"stage": "asr", "status": "done"})
+
+            yield sse_event("progress", {"stage": "correction", "status": "start"})
+            corrected_text = await correct_text(original_text)
+            yield sse_event("progress", {"stage": "correction", "status": "done"})
+
+            yield sse_event("progress", {"stage": "chat", "status": "start"})
+            graph = get_graph()
+            user_message = HumanMessage(content=corrected_text)
+            final_ai_message = ""
+            streamed_chunks: list[str] = []
+            action = "None"
+            action_data = None
+            STREAMING_NODES = {"menu_agent", "order_agent", "promotion_agent", "agent"}
+            status_sent = set()
+
+            async for event in graph.astream_events(
+                {
+                    "messages": [user_message],
+                    "session_id": session_id,
+                },
+                version="v2",
+            ):
+                kind = event.get("event", "")
+                node_name = event.get("metadata", {}).get("langgraph_node", "")
+
+                if kind == "on_chain_start":
+                    if node_name and node_name not in status_sent:
+                        status_sent.add(node_name)
+                        if node_name in STREAMING_NODES:
+                            yield sse_event("status", {"stage": "answering", "node": node_name})
+                        elif node_name in {"coordinator", "data_team", "action_team"}:
+                            yield sse_event("status", {"stage": "routing", "node": node_name})
+
+                if kind == "on_chat_model_stream" and node_name in STREAMING_NODES:
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        streamed_chunks.append(str(chunk.content))
+                        yield sse_event("token", {"text": str(chunk.content)})
+
+                if kind == "on_chain_end":
+                    output = event.get("data", {}).get("output")
+                    if isinstance(output, dict):
+                        extracted = _extract_last_ai_message(output.get("messages", []))
+                        if extracted:
+                            final_ai_message = extracted
+                        action = output.get("action", action) or action
+                        action_data = output.get("action_data", action_data)
+
+            yield sse_event("progress", {"stage": "chat", "status": "done"})
+
+            response_text = final_ai_message or "".join(streamed_chunks).strip()
+            if not response_text:
+                response_text = "Sorry, I couldn't process your request. Please try again."
+
+            yield sse_event(
+                "final",
+                {
+                    "original_text": original_text,
+                    "corrected_text": corrected_text,
+                    "response": response_text,
+                    "action": action or "None",
+                    "action_data": action_data,
+                    "session_id": session_id,
+                },
+            )
+            yield sse_event("done", {"done": True})
+
+        except Exception:
+            logger.error(
+                "FLOW voice_chat.stream_failed session_id=%s",
+                session_id,
+                exc_info=True,
+            )
+            yield sse_event("error", {"message": "Voice chat streaming failed"})
+            yield sse_event("done", {"done": True})
+
+    return StreamingResponse(
+        stream_sse(request, event_source()),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )

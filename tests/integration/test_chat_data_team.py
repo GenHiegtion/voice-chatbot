@@ -71,7 +71,9 @@ class ChatDataTeamIntegrationTest(unittest.TestCase):
                 content = "".join(response.iter_text())
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("data: Xin", content)
+        self.assertIn("event: token", content)
+        self.assertIn('"text": "Xin"', content)
+        self.assertIn("event: final", content)
         self.assertIn("event: done", content)
 
     def test_chat_reuses_session_context(self):
