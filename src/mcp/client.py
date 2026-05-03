@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 def _mcp_url() -> str:
     settings = get_settings()
-    host = settings.mcp_host
+    # Use mcp_client_host (default: 127.0.0.1) to connect to the MCP server.
+    # mcp_host is the *bind* address (0.0.0.0) and must NOT be used as a
+    # client-side target — doing so causes HTTP 421 Misdirected Request.
+    host = settings.mcp_client_host
     port = settings.mcp_port
     return f"http://{host}:{port}/mcp"
 
@@ -39,6 +42,8 @@ def _extract_text(contents: list[Any]) -> str:
 
 async def call_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> str:
     """Call MCP tool over streamable HTTP and return text output."""
+    logger.info("AGENT CALLING TOOL: %s | Args: %s", tool_name, arguments)
+    
     settings = get_settings()
     if not settings.mcp_auth_token:
         return "MCP_AUTH_TOKEN is missing."

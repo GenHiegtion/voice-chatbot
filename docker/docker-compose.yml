@@ -14,6 +14,9 @@ services:
       REDIS_ENABLED: "true"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       REDIS_TTL_SECONDS: ${REDIS_TTL_SECONDS:-3600}
+      # When TOOL_PROVIDER=mcp, the app must reach the mcp container by its
+      # service name (not 0.0.0.0 which is the bind address of the server).
+      MCP_CLIENT_HOST: mcp
     volumes:
       - hf-cache:/cache/hf
       - torch-cache:/cache/torch
@@ -21,6 +24,8 @@ services:
       redis:
         condition: service_healthy
       mysql:
+        condition: service_healthy
+      mcp:
         condition: service_healthy
     restart: unless-stopped
 

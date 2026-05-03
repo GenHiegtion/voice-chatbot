@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     # MCP server
     mcp_enabled: bool = False
     mcp_transport: Literal["http", "streamable-http"] = "http"
-    mcp_host: str = "0.0.0.0"
+    mcp_host: str = "0.0.0.0"  # bind address for the MCP server process
+    mcp_client_host: str = "127.0.0.1"  # host the main app uses to reach the MCP server
     mcp_port: int = 8002
     mcp_auth_token: str = ""
     mcp_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
